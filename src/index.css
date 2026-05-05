@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --bg-app: #f6f7f9;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f1f3f5;
+  --border-subtle: #eef0f2;
+  --border-default: #d4d7dc;
+  --text-primary: #14161a;
+  --text-secondary: #5b6470;
+  --text-muted: #8a929c;
+  --accent: #0b6bcb;
+  --accent-soft: #e7f0fb;
+  --warn-bg: #fff8e6;
+  --warn-border: #f5d77a;
+  --warn-text: #8a5a00;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.05);
+}
+
+body {
+  margin: 0;
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.data-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.7rem;
+}
+
+.uplot .u-legend {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 12px;
+}
