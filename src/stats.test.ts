@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { computeFileStats, computePairwiseStats } from './stats'
-import type { ResampledSeries, MetricKey } from './types'
+import type { ResampledSeries, MetricKey, AlignmentResult } from './types'
 
 const M: MetricKey[] = ['power', 'cadence', 'heartRate', 'speed', 'elevation', 'temperature']
 
@@ -57,6 +57,79 @@ describe('computeFileStats', () => {
     expect(result.mean).toBe(250)
     expect(result.stddev).toBe(0)
     expect(result.n).toBe(1)
+  })
+
+  describe('with range', () => {
+    function refAlignment(fromTime: number, toTime: number): AlignmentResult {
+      return {
+        status: 'ok',
+        segments: [{ fromTime, toTime, offsetSeconds: 0 }],
+      }
+    }
+
+    it('reference file: filters samples on the local timebase (offset 0)', () => {
+      const series = makeSeries([100, 200, 300, 400, 500])
+      // timestamps: 0, 1000, 2000, 3000, 4000
+      const align = refAlignment(0, 4000)
+      const result = computeFileStats(series, 'power', align, { fromTime: 1000, toTime: 3000 })
+
+      expect(result.n).toBe(3)
+      expect(result.mean).toBeCloseTo(300)
+      expect(result.min).toBe(200)
+      expect(result.max).toBe(400)
+    })
+
+    it('non-reference file: translates aligned range through segment offset', () => {
+      const series = makeSeries([100, 200, 300, 400, 500])
+      // local timestamps: 0, 1000, 2000, 3000, 4000
+      // displayed = local + 5000ms (offset 5s)
+      const align: AlignmentResult = {
+        status: 'ok',
+        segments: [{ fromTime: 0, toTime: 4000, offsetSeconds: 5 }],
+      }
+      // Aligned range [6000, 8000] -> local [1000, 3000] -> picks values 200, 300, 400
+      const result = computeFileStats(series, 'power', align, { fromTime: 6000, toTime: 8000 })
+
+      expect(result.n).toBe(3)
+      expect(result.mean).toBeCloseTo(300)
+
+      // Sanity: same numeric range without translation would have picked 100, 200, 300 (mean 200)
+      const wrong = computeFileStats(series, 'power', null, { fromTime: 0, toTime: 2000 })
+      expect(wrong.mean).toBeCloseTo(200)
+    })
+
+    it('returns nulls when range yields zero samples', () => {
+      const series = makeSeries([100, 200, 300])
+      const align = refAlignment(0, 2000)
+      const result = computeFileStats(series, 'power', align, { fromTime: 10_000, toTime: 20_000 })
+
+      expect(result.mean).toBeNull()
+      expect(result.max).toBeNull()
+      expect(result.n).toBe(0)
+    })
+
+    it('multi-segment alignment: range straddling a pause gap', () => {
+      const series = makeSeries([10, 20, 30, 40, 50, 60])
+      // local timestamps: 0, 1000, 2000, 3000, 4000, 5000
+      // segment A: local 0..2000, offset 0  -> displayed 0..2000
+      // segment B: local 3000..5000, offset 10 -> displayed 13000..15000
+      const align: AlignmentResult = {
+        status: 'ok',
+        segments: [
+          { fromTime: 0, toTime: 2000, offsetSeconds: 0 },
+          { fromTime: 3000, toTime: 5000, offsetSeconds: 10 },
+        ],
+      }
+      // Aligned range [1000, 14000] picks:
+      //   from seg A: local [1000, 2000] -> values 20, 30
+      //   from seg B: local [3000, 4000] -> values 40, 50
+      const result = computeFileStats(series, 'power', align, { fromTime: 1000, toTime: 14000 })
+
+      expect(result.n).toBe(4)
+      expect(result.mean).toBeCloseTo((20 + 30 + 40 + 50) / 4)
+      expect(result.min).toBe(20)
+      expect(result.max).toBe(50)
+    })
   })
 })
 
@@ -129,5 +202,52 @@ describe('computePairwiseStats', () => {
     // MPE: zeros are < epsilon, so excluded from MPE
     expect(result.mpe).toBeNull()
     expect(result.mae).toBe(0)
+  })
+
+  describe('with range', () => {
+    it('restricts pairs to range and skips outside it', () => {
+      const ref = makeSeries([100, 200, 300, 400, 500])
+      const other = makeSeries([110, 210, 310, 410, 510])
+      // refTimestamps: 0, 1000, 2000, 3000, 4000
+      const result = computePairwiseStats(ref, other, 'power', null, null, {
+        fromTime: 1000,
+        toTime: 3000,
+      })
+
+      expect(result.n).toBe(3)
+      expect(result.mae).toBeCloseTo(10, 4)
+    })
+
+    it('returns insufficient-pairs result when range is too narrow', () => {
+      const ref = makeSeries([100, 200, 300])
+      const other = makeSeries([100, 200, 300])
+      const result = computePairwiseStats(ref, other, 'power', null, null, {
+        fromTime: 0,
+        toTime: 0,
+      })
+
+      expect(result.n).toBe(1)
+      expect(result.r).toBeNull()
+    })
+
+    it('range overlapping a pause region still excludes the pause', () => {
+      const ref = makeSeries([100, 200, 300, 400, 500])
+      const other = makeSeries([100, 200, 300, 400, 500])
+      // ref pause between 1500..2500 (covers ts=2000)
+      const refAlign: AlignmentResult = {
+        status: 'ok',
+        segments: [
+          { fromTime: 0, toTime: 1500, offsetSeconds: 0 },
+          { fromTime: 2500, toTime: 4000, offsetSeconds: 0 },
+        ],
+      }
+      const result = computePairwiseStats(ref, other, 'power', refAlign, null, {
+        fromTime: 0,
+        toTime: 4000,
+      })
+
+      // ts=2000 sits inside the pause and must be excluded; the rest (4 pts) survive
+      expect(result.n).toBe(4)
+    })
   })
 })

@@ -6,7 +6,7 @@ FIT Compare is a single-page web application that takes multiple .fit cycling fi
 
 The application runs entirely in the browser. There is no server, no database, no user accounts, no file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero server, zero persistence) shapes every architectural choice. The app is a static set of HTML, CSS, and JS files; it can be served from any HTTP server or opened from a `file://` URL in a pinch (though `file://` is not officially supported).
 
-A user drops one or more .fit files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart with zoom, pan, and series toggling. A statistics panel below the chart computes per-file descriptive stats and pairwise comparisons (Pearson r, mean absolute error, mean percentage error). If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
+A user drops one or more .fit files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart with zoom, pan, and series toggling. A statistics panel below the chart computes per-file descriptive stats and pairwise comparisons (Pearson r, mean absolute error, mean percentage error); dragging on the graph creates a time-range selection and the panel adds a second block recomputed over only that range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
 
 ## 2. The N-second architecture
 
@@ -142,8 +142,8 @@ The UI is a single-page React app with no routing. Six components compose the pa
 |`App.tsx`|Top-level layout: header, file-drop zone, alignment-failure banner, metric selector, graph, stats, offset controls.|
 |`FileDropZone.tsx`|Drag-and-drop zone + hidden file input. Displays file cards with colour swatch, device name, record count, parse status, warnings, and remove button.|
 |`MetricSelector.tsx`|Row of pill buttons for each of six metrics. Greys out metrics absent from all loaded files.|
-|`FitGraph.tsx`|uPlot canvas. Builds shared timeline from union of all files' offset-adjusted timestamps. Handles resize via `ResizeObserver`.|
-|`StatsPanel.tsx`|Two HTML tables: per-file descriptive stats, pairwise comparisons against the first file.|
+|`FitGraph.tsx`|uPlot canvas. Builds shared timeline from union of all files' offset-adjusted timestamps. Handles resize via `ResizeObserver`. Drag = time-range selection (zoom-on-drag is disabled); the brush is two-way bound to the store's `selection` state.|
+|`StatsPanel.tsx`|Per-file descriptive stats and pairwise comparisons against the first file. When `selection` is set, a second block below renders the same tables recomputed over only the selected range, with a "Clear selection" button.|
 |`OffsetControls.tsx`|Collapsible panel with per-file, per-segment offset editors. Link-all-segments checkbox. Global nudge-all-files controls.|
 
 ### 6.1 Why uPlot
@@ -158,7 +158,7 @@ The store holds all application state (files, parse results, alignment results, 
 
 Zustand was chosen over React Context. It does not require a provider wrapper. Selectors avoid unnecessary re-renders (Context forces re-render of all consumers when any part of the context changes). It supports reading state imperatively (`get()`) inside async actions, which matters for `addFiles` (parse a file, push it to the list, then run alignment on the new list, all within the same action). And it has zero boilerplate compared to Redux.
 
-The store alone is 216 lines. The actions are pure Zustand `set` calls; there is no middleware.
+The store alone is 269 lines. The actions are pure Zustand `set` calls; there is no middleware.
 
 ### 6.3 Duplicate detection
 
@@ -183,6 +183,8 @@ The graph and stats panel react to changes in `files[]` and `selectedMetric` via
 
 When the user edits an offset in `OffsetControls`, the store mutates the `alignmentResult.segments` array in place (via immutable spread in `nudgeOffset` or `setSegmentOffset`). The graph and stats panel re-render because their selectors depend on `files[]`, which changed. There is no explicit event bus or callback chain; the store is the channel.
 
+The graph selection is a thin two-way binding over the store's `selection` field. Dragging fires uPlot's `setSelect` hook, which converts the pixel range to data coordinates and calls `setSelection`. A guard ref prevents the reverse path (store -> chart re-apply via `u.setSelect`) from re-entering the hook. The selection itself is stored as `{ fromTime, toTime }` in milliseconds on the **reference (aligned) timebase** -- the same units the graph's x-axis displays. Because each file's `ResampledSeries.timestamps` are on its own local timebase, `computeFileStats` translates the aligned range through that file's segment offsets before filtering (the reference file always has zero offsets, so its local and aligned timebases coincide). `computePairwiseStats` walks the reference file's timestamps and so can short-circuit on the range directly. Selections are clamped to the combined data extent in `setSelection` and again in every store action that can shift extents (`removeFile`, `recomputeAlignment`, `nudgeOffset`, `setSegmentOffset`, `nudgeAllOffsets`); a clamped selection that collapses to zero width becomes `null`. This means selections survive metric switches and small offset nudges, but disappear when files are removed in a way that pushes the selection entirely out of bounds.
+
 ## 8. Supporting scripts and tests
 
 |File|What it tests|Tests|
@@ -190,8 +192,9 @@ When the user edits an offset in `OffsetControls`, the store mutates the `alignm
 |`src/parser.test.ts`|`parseFitFile` with mocked `fit-file-parser`: error, zero records, full records, missing power, optional fields, numeric timestamps.|6|
 |`src/resample.test.ts`|`resample()` with synthetic `FitSession`: empty, evenly spaced, rounding, gaps, single record, irregular spacing, same-tick overwrite, multi-metric nulls.|8|
 |`src/align.test.ts`|`alignPair` and `alignAll`: known offset, zero offset, single pause, no pauses, no overlap, random noise, empty series, multi-file, mixed success/failure.|9|
-|`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs.|12|
-|`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching.|12|
+|`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, and the selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps).|18|
+|`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching, and selection lifecycle (clamping, out-of-bounds clearing, clearAll/removeFile cleanup).|17|
+|`src/components/StatsPanel.test.tsx`|`StatsPanel` renders the selection block with stats distinct from the full-file stats when a selection is active, and the "Clear selection" button dismisses it.|3|
 |`src/components/FitGraph.test.tsx`|Smoke test that the component mounts without crashing.|1|
 
 All tests use Vitest with jsdom. The test setup file (`src/test-setup.ts`) provides a mock `window.matchMedia` (needed by uPlot at import time) and the `@testing-library/jest-dom` matchers. The parser and resample mocks in store tests prevent the store from calling real I/O.
@@ -224,7 +227,7 @@ Read the files in this order:
 
 4. `src/align.ts` (380 lines). The algorithmic core. Start at the exported `alignPair` function and trace through the three passes. The constants at the top are the tuning knobs.
 
-5. `src/stats.ts` (202 lines). `computeFileStats` and `computePairwiseStats`. Shows how alignment offsets are applied to look up values in the resampled grid, and how pause regions and nulls are excluded from comparisons.
+5. `src/stats.ts` (272 lines). `computeFileStats` and `computePairwiseStats`. Shows how alignment offsets are applied to look up values in the resampled grid, how pause regions and nulls are excluded from comparisons, and how an aligned-timebase selection range is translated through per-segment offsets into per-file local windows.
 
 6. `src/store.ts` (216 lines). The Zustand store. Read `addFiles` to see how parse, resample, and align are chained. Read the offset mutation actions to see how manual edits propagate.
 

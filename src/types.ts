@@ -49,6 +49,12 @@ export interface ResampledSeries {
   values: Record<MetricKey, (number | null)[]>
 }
 
+/** A user-selected time range on the reference (aligned) timebase, in ms - the same units as the graph's x-axis. */
+export interface Selection {
+  fromTime: number
+  toTime: number
+}
+
 /** A time segment with an offset correction (in seconds). */
 export interface OffsetSegment {
   fromTime: number

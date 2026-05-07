@@ -20,13 +20,44 @@ export interface PairwiseStats {
 /**
  * Compute per-file descriptive statistics from resampled data.
  * Only uses the 1 Hz grid, ignoring nulls.
+ *
+ * `range` is on the reference (aligned) timebase - the same one the graph
+ * displays. Because `series.timestamps` are on the file's local timebase, the
+ * range is translated through `alignment.segments` per segment before
+ * filtering. The reference file has zero offsets so its local and aligned
+ * timebases coincide.
  */
 export function computeFileStats(
   series: ResampledSeries,
   metric: MetricKey,
+  alignment: AlignmentResult | null = null,
+  range?: { fromTime: number; toTime: number },
 ): FileStats {
   const values = series.values[metric]
-  const nonNull = values.filter((v): v is number => v !== null)
+  const ts = series.timestamps
+
+  let nonNull: number[]
+  if (range) {
+    const localWindows = alignedRangeToLocalWindows(range, alignment)
+    if (localWindows.length === 0) {
+      return { mean: null, max: null, min: null, stddev: null, n: 0 }
+    }
+    nonNull = []
+    for (let i = 0; i < ts.length; i++) {
+      const v = values[i]
+      if (v === null) continue
+      const t = ts[i]
+      for (const w of localWindows) {
+        if (t >= w.from && t <= w.to) {
+          nonNull.push(v)
+          break
+        }
+      }
+    }
+  }
+  else {
+    nonNull = values.filter((v): v is number => v !== null)
+  }
 
   if (nonNull.length === 0) {
     return { mean: null, max: null, min: null, stddev: null, n: 0 }
@@ -35,14 +66,46 @@ export function computeFileStats(
   const n = nonNull.length
   const sum = nonNull.reduce((a, b) => a + b, 0)
   const mean = sum / n
-  const max = Math.max(...nonNull)
-  const min = Math.min(...nonNull)
+  let max = nonNull[0]
+  let min = nonNull[0]
+  for (const v of nonNull) {
+    if (v > max) max = v
+    if (v < min) min = v
+  }
 
   const variance =
     nonNull.reduce((acc, v) => acc + (v - mean) ** 2, 0) / n
   const stddev = Math.sqrt(variance)
 
   return { mean, max, min, stddev, n }
+}
+
+/**
+ * Translate an aligned-timebase range into per-segment local-timebase windows.
+ * For each segment s, the displayed window is
+ *   [s.fromTime + s.offsetSeconds*1000, s.toTime + s.offsetSeconds*1000]
+ * (in aligned time). Intersect with the requested range and subtract the
+ * offset to get back to local time. With no segments (e.g. unaligned single
+ * file) the range is treated as already on the local timebase.
+ */
+function alignedRangeToLocalWindows(
+  range: { fromTime: number; toTime: number },
+  alignment: AlignmentResult | null,
+): { from: number; to: number }[] {
+  const segments = alignment?.segments ?? []
+  if (segments.length === 0) {
+    return [{ from: range.fromTime, to: range.toTime }]
+  }
+  const out: { from: number; to: number }[] = []
+  for (const s of segments) {
+    const offsetMs = s.offsetSeconds * 1000
+    const segDisplayedFrom = s.fromTime + offsetMs
+    const segDisplayedTo = s.toTime + offsetMs
+    const lo = Math.max(range.fromTime, segDisplayedFrom)
+    const hi = Math.min(range.toTime, segDisplayedTo)
+    if (lo <= hi) out.push({ from: lo - offsetMs, to: hi - offsetMs })
+  }
+  return out
 }
 
 /**
@@ -126,6 +189,10 @@ function getAlignedValue(
  * (e) MPE excludes rows where ref value < epsilon
  *
  * The "ref" series uses index 0 (first uploaded file) for MPE.
+ *
+ * `range` is on the reference (aligned) timebase. The ref file's offset is
+ * always 0 (see align.ts), so refTimestamps are already aligned and a direct
+ * comparison against the range bounds is correct.
  */
 export function computePairwiseStats(
   refSeries: ResampledSeries,
@@ -133,6 +200,7 @@ export function computePairwiseStats(
   metric: MetricKey,
   refAlignment: AlignmentResult | null,
   otherAlignment: AlignmentResult | null,
+  range?: { fromTime: number; toTime: number },
 ): PairwiseStats {
   const refValues = refSeries.values[metric]
   const refTimestamps = refSeries.timestamps
@@ -147,10 +215,12 @@ export function computePairwiseStats(
   const pairs: { ref: number; other: number }[] = []
 
   for (let i = 0; i < refTimestamps.length; i++) {
+    const ts = refTimestamps[i]
+
+    if (range && (ts < range.fromTime || ts > range.toTime)) continue
+
     const refVal = refValues[i]
     if (refVal === null) continue
-
-    const ts = refTimestamps[i]
 
     // Skip if ref is in a pause
     if (timestampInPause(ts, refAlignment)) continue

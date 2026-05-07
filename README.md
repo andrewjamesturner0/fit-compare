@@ -10,9 +10,10 @@ Primary use case: comparing power meters on the same ride.
 2. Drop one or more `.fit` files onto the drop zone (or click to browse)
 3. Files are automatically parsed and aligned
 4. Use the metric selector to switch between power, cadence, heart rate, speed, elevation, and temperature
-5. Zoom by scrolling or dragging a brush rectangle; pan by click-dragging
-6. The stats panel below the graph shows descriptive statistics and pairwise comparisons
-7. Expand "Adjust Offsets" to manually correct alignment if auto-alignment gets it wrong
+5. Zoom by scrolling; pan by click-dragging
+6. Drag horizontally on the graph to select a time range. The stats panel adds a "Selection" block showing stats restricted to that range, alongside the full-file stats. Click "Clear selection" (or click the graph) to dismiss
+7. The stats panel below the graph shows descriptive statistics and pairwise comparisons
+8. Expand "Adjust Offsets" to manually correct alignment if auto-alignment gets it wrong
 
 ## Build and run
 
@@ -45,6 +46,7 @@ If correlation confidence is too low, the file falls back to clock-time alignmen
 - **Pairwise:** Pearson r, MAE, MPE (first uploaded file is used as reference for MPE; values near zero are excluded to avoid division blow-up)
 - Pause regions and nulls are excluded pairwise from all comparisons
 - Zeros are kept (coasting power is real data)
+- **Selection scope:** when a time range is selected on the graph, the stats panel adds a second block recomputed over only that range. Selections are stored on the reference (aligned) timebase; for non-reference files the range is translated through their alignment offsets before filtering, so the right slice of each file is included regardless of per-file offset. Selections are clamped to the visible data extent and survive metric switches and offset nudges; they are cleared when all files are removed or when nudges push them out of bounds
 
 ### Graph vs stats
 

@@ -28,6 +28,7 @@ function resetStore() {
     files: [],
     referenceFileId: null,
     selectedMetric: 'power',
+    selection: null,
   })
 }
 
@@ -267,5 +268,76 @@ describe('store', () => {
       expect(useStore.getState().selectedMetric).toBe('heartRate')
     })
   })
+
+  describe('selection', () => {
+    it('defaults to null', () => {
+      expect(useStore.getState().selection).toBeNull()
+    })
+
+    it('rejects a selection with no files (no extent)', () => {
+      useStore.getState().setSelection({ fromTime: 1000, toTime: 2000 })
+      expect(useStore.getState().selection).toBeNull()
+    })
+
+    it('clamps a selection to the data extent', async () => {
+      const mockParse = vi.mocked(parseFitFile)
+      mockParse.mockResolvedValueOnce(mockParseResult())
+
+      await useStore.getState().addFiles([makeFile('a.fit', 100)])
+      const id = useStore.getState().files[0].id
+      useStore.getState().setAlignmentResult(id, {
+        status: 'ok',
+        segments: [{ fromTime: 1000, toTime: 3000, offsetSeconds: 0 }],
+      })
+
+      // Request a range that overflows on both sides
+      useStore.getState().setSelection({ fromTime: 0, toTime: 10_000 })
+      expect(useStore.getState().selection).toEqual({ fromTime: 1000, toTime: 3000 })
+    })
+
+    it('clears a selection that falls entirely outside the extent', async () => {
+      const mockParse = vi.mocked(parseFitFile)
+      mockParse.mockResolvedValueOnce(mockParseResult())
+
+      await useStore.getState().addFiles([makeFile('a.fit', 100)])
+      const id = useStore.getState().files[0].id
+      useStore.getState().setAlignmentResult(id, {
+        status: 'ok',
+        segments: [{ fromTime: 1000, toTime: 3000, offsetSeconds: 0 }],
+      })
+
+      useStore.getState().setSelection({ fromTime: 10_000, toTime: 20_000 })
+      expect(useStore.getState().selection).toBeNull()
+    })
+
+    it('clearAll wipes the selection', async () => {
+      const mockParse = vi.mocked(parseFitFile)
+      mockParse.mockResolvedValueOnce(mockParseResult())
+      await useStore.getState().addFiles([makeFile('a.fit', 100)])
+      const id = useStore.getState().files[0].id
+      useStore.getState().setAlignmentResult(id, {
+        status: 'ok',
+        segments: [{ fromTime: 1000, toTime: 3000, offsetSeconds: 0 }],
+      })
+      useStore.getState().setSelection({ fromTime: 1500, toTime: 2500 })
+
+      useStore.getState().clearAll()
+      expect(useStore.getState().selection).toBeNull()
+    })
+
+    it('removeFile to empty wipes the selection', async () => {
+      const mockParse = vi.mocked(parseFitFile)
+      mockParse.mockResolvedValueOnce(mockParseResult())
+      await useStore.getState().addFiles([makeFile('a.fit', 100)])
+      const id = useStore.getState().files[0].id
+      useStore.getState().setAlignmentResult(id, {
+        status: 'ok',
+        segments: [{ fromTime: 1000, toTime: 3000, offsetSeconds: 0 }],
+      })
+      useStore.getState().setSelection({ fromTime: 1500, toTime: 2500 })
+
+      useStore.getState().removeFile(id)
+      expect(useStore.getState().selection).toBeNull()
+    })
+  })
 })
-// Debug: let's add a simple test to verify addFiles sets referenceFileId

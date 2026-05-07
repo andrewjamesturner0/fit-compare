@@ -107,6 +107,9 @@ export function FitGraph() {
   const uplotRef = useRef<uPlot | null>(null)
   const files = useStore((s) => s.files)
   const selectedMetric = useStore((s) => s.selectedMetric)
+  const selection = useStore((s) => s.selection)
+  const setSelection = useStore((s) => s.setSelection)
+  const settingFromStore = useRef(false)
 
   const activeFiles = useMemo(
     () => files.filter(
@@ -160,7 +163,7 @@ export function FitGraph() {
         },
       ],
       cursor: {
-        drag: { x: true, y: false },
+        drag: { x: true, y: false, setScale: false },
         points: { size: 6 },
         x: true,
         y: false,
@@ -169,12 +172,31 @@ export function FitGraph() {
         show: true,
         over: true,
       },
+      hooks: {
+        setSelect: [
+          (u: uPlot) => {
+            if (settingFromStore.current) return
+            const { left, width } = u.select
+            if (width <= 0) {
+              setSelection(null)
+              return
+            }
+            const fromTime = u.posToVal(left, 'x')
+            const toTime = u.posToVal(left + width, 'x')
+            if (!isFinite(fromTime) || !isFinite(toTime) || fromTime >= toTime) {
+              setSelection(null)
+              return
+            }
+            setSelection({ fromTime, toTime })
+          },
+        ],
+      },
       legend: {
         show: true,
         live: false,
       },
     } as uPlot.Options
-  }, [activeFiles])
+  }, [activeFiles, setSelection])
 
   // Reconstruct chart only when opts change (files added/removed/changed).
   // opts changes when activeFiles changes, which changes when files change.
@@ -220,6 +242,29 @@ export function FitGraph() {
       uplotRef.current.setData(data)
     }
   }, [data])
+
+  // Reflect store-side selection changes (cleared from panel, clamped after
+  // file removal, etc.) back onto the uPlot brush. The settingFromStore guard
+  // prevents the setSelect hook from re-entering setSelection.
+  useEffect(() => {
+    const u = uplotRef.current
+    if (!u) return
+    settingFromStore.current = true
+    try {
+      if (!selection) {
+        u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
+        return
+      }
+      const left = u.valToPos(selection.fromTime, 'x')
+      const right = u.valToPos(selection.toTime, 'x')
+      const top = 0
+      const height = u.bbox.height / window.devicePixelRatio
+      u.setSelect({ left, top, width: Math.max(right - left, 0), height }, false)
+    }
+    finally {
+      settingFromStore.current = false
+    }
+  }, [selection, data])
 
   return (
     <div className="flex-1 flex flex-col min-h-0">

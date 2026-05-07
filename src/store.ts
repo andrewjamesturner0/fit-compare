@@ -1,10 +1,53 @@
 import { create } from 'zustand'
-import type { FileEntry, MetricKey } from './types'
+import type { FileEntry, MetricKey, Selection } from './types'
 import { parseFitFile } from './parser'
 import { resample } from './resample'
 import { alignAll } from './align'
 
 let nextId = 1
+
+/**
+ * Combined displayed time extent (in ms, on the aligned timebase) across all
+ * non-error files. Returns null when no file contributes data.
+ */
+function computeDataExtent(files: FileEntry[]): { min: number; max: number } | null {
+  let min = Infinity
+  let max = -Infinity
+  for (const f of files) {
+    if (f.parseResult?.status === 'error' || !f.resampledSeries) continue
+    const segments = f.alignmentResult?.segments ?? []
+    if (segments.length > 0) {
+      const first = segments[0]
+      const last = segments[segments.length - 1]
+      const lo = first.fromTime + first.offsetSeconds * 1000
+      const hi = last.toTime + last.offsetSeconds * 1000
+      if (lo < min) min = lo
+      if (hi > max) max = hi
+    }
+    else {
+      const ts = f.resampledSeries.timestamps
+      if (ts.length === 0) continue
+      if (ts[0] < min) min = ts[0]
+      if (ts[ts.length - 1] > max) max = ts[ts.length - 1]
+    }
+  }
+  if (!isFinite(min) || !isFinite(max) || min >= max) return null
+  return { min, max }
+}
+
+/**
+ * Clamp a selection to the current data extent. Returns null if the selection
+ * collapses to zero width or there is no extent.
+ */
+function clampSelection(selection: Selection | null, files: FileEntry[]): Selection | null {
+  if (!selection) return null
+  const extent = computeDataExtent(files)
+  if (!extent) return null
+  const fromTime = Math.max(selection.fromTime, extent.min)
+  const toTime = Math.min(selection.toTime, extent.max)
+  if (fromTime >= toTime) return null
+  return { fromTime, toTime }
+}
 
 async function parseFileToEntry(file: File, id: string): Promise<FileEntry> {
   const parseResult = await parseFitFile(file)
@@ -29,6 +72,7 @@ export interface AppState {
   files: FileEntry[]
   referenceFileId: string | null
   selectedMetric: MetricKey
+  selection: Selection | null
 
   addFiles: (files: File[]) => Promise<void>
   removeFile: (id: string) => void
@@ -40,12 +84,14 @@ export interface AppState {
   nudgeOffset: (id: string, deltaSeconds: number) => void
   setSegmentOffset: (id: string, segmentIndex: number, offsetSeconds: number) => void
   nudgeAllOffsets: (deltaSeconds: number) => void
+  setSelection: (selection: Selection | null) => void
 }
 
 export const useStore = create<AppState>((set, get) => ({
   files: [],
   referenceFileId: null,
   selectedMetric: 'power',
+  selection: null,
 
   addFiles: async (files: File[]) => {
     const state = get()
@@ -112,18 +158,17 @@ export const useStore = create<AppState>((set, get) => ({
     const state = get()
     const files = state.files.filter((f) => f.id !== id)
     let refId = state.referenceFileId
-    console.log('DEBUG removeFile:', { id, refId, filesLen: files.length, refIdEqId: refId === id })
     if (refId === id) {
       const okFiles = files.filter(
         (f) => f.parseResult?.status !== 'error' && f.parseResult?.session,
       )
       refId = okFiles.length > 0 ? okFiles[0].id : null
-      console.log('DEBUG removeFile newRef:', refId, 'okFiles:', okFiles.map(f => f.id))
     }
-    set({ files, referenceFileId: refId })
+    const selection = files.length === 0 ? null : clampSelection(state.selection, files)
+    set({ files, referenceFileId: refId, selection })
   },
 
-  clearAll: () => set({ files: [], referenceFileId: null, selectedMetric: 'power' }),
+  clearAll: () => set({ files: [], referenceFileId: null, selectedMetric: 'power', selection: null }),
 
   setSelectedMetric: (metric: MetricKey) => set({ selectedMetric: metric }),
 
@@ -138,8 +183,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   nudgeOffset: (id: string, deltaSeconds: number) => {
-    set((state) => ({
-      files: state.files.map((f) => {
+    set((state) => {
+      const files = state.files.map((f) => {
         if (f.id !== id || !f.alignmentResult) return f
         return {
           ...f,
@@ -151,13 +196,14 @@ export const useStore = create<AppState>((set, get) => ({
             })),
           },
         }
-      }),
-    }))
+      })
+      return { files, selection: clampSelection(state.selection, files) }
+    })
   },
 
   setSegmentOffset: (id: string, segmentIndex: number, offsetSeconds: number) => {
-    set((state) => ({
-      files: state.files.map((f) => {
+    set((state) => {
+      const files = state.files.map((f) => {
         if (f.id !== id || !f.alignmentResult) return f
         const segments = f.alignmentResult.segments.map((s, i) =>
           i === segmentIndex ? { ...s, offsetSeconds } : s,
@@ -166,13 +212,14 @@ export const useStore = create<AppState>((set, get) => ({
           ...f,
           alignmentResult: { ...f.alignmentResult, segments },
         }
-      }),
-    }))
+      })
+      return { files, selection: clampSelection(state.selection, files) }
+    })
   },
 
   nudgeAllOffsets: (deltaSeconds: number) => {
-    set((state) => ({
-      files: state.files.map((f) => {
+    set((state) => {
+      const files = state.files.map((f) => {
         if (!f.alignmentResult) return f
         return {
           ...f,
@@ -184,8 +231,9 @@ export const useStore = create<AppState>((set, get) => ({
             })),
           },
         }
-      }),
-    }))
+      })
+      return { files, selection: clampSelection(state.selection, files) }
+    })
   },
 
   recomputeAlignment: () => {
@@ -205,12 +253,17 @@ export const useStore = create<AppState>((set, get) => ({
     const series = okFiles.map((f) => f.resampledSeries!)
     const results = alignAll(series, refIdx)
 
-    set((state) => ({
-      files: state.files.map((f) => {
+    set((state) => {
+      const files = state.files.map((f) => {
         const idx = okFiles.findIndex((of) => of.id === f.id)
         if (idx === -1 || !results.has(idx)) return f
         return { ...f, alignmentResult: results.get(idx)! }
-      }),
-    }))
+      })
+      return { files, selection: clampSelection(state.selection, files) }
+    })
+  },
+
+  setSelection: (selection: Selection | null) => {
+    set((state) => ({ selection: clampSelection(selection, state.files) }))
   },
 }))
