@@ -54,8 +54,17 @@ function getAlignedTrace(
 }
 
 /**
- * Compute normalised SSE between two aligned traces.
- * Returns SSE / overlapLength, or Infinity if overlap is too short or no valid pairs.
+ * Compute the residual sum of squares between two aligned traces, normalised
+ * by the reference signal's total sum of squares about its own mean.
+ *
+ * The result is dimensionless and scale-free (it is 1 - R^2 of `other` vs
+ * `ref`). 0 means perfect alignment; 1 means the residual is as large as the
+ * signal's natural variance; values > 1 are worse than predicting the mean.
+ * A single absolute threshold therefore works across metrics with very
+ * different units (W, bpm, m/s).
+ *
+ * Returns Infinity if the overlap is empty or the reference signal is flat
+ * (zero variance) over the overlap.
  */
 function normalizedSSE(
   refValues: (number | null)[],
@@ -63,14 +72,24 @@ function normalizedSSE(
 ): number {
   let sse = 0
   let overlap = 0
+  let refSum = 0
   for (let i = 0; i < refValues.length; i++) {
     if (refValues[i] !== null && otherValues[i] !== null) {
       sse += (refValues[i]! - otherValues[i]!) ** 2
+      refSum += refValues[i]!
       overlap++
     }
   }
   if (overlap === 0) return Infinity
-  return sse / overlap
+  const refMean = refSum / overlap
+  let sst = 0
+  for (let i = 0; i < refValues.length; i++) {
+    if (refValues[i] !== null && otherValues[i] !== null) {
+      sst += (refValues[i]! - refMean) ** 2
+    }
+  }
+  if (sst === 0) return Infinity
+  return sse / sst
 }
 
 /**
@@ -329,7 +348,7 @@ export function alignPair(
     return {
       status: 'failed',
       segments: [],
-      warning: `Could not find reliable alignment (SSE=${bestSSE.toFixed(2)}, overlap=${overlap}s)`,
+      warning: `Could not find reliable alignment (residual ratio=${bestSSE.toFixed(2)}, overlap=${overlap}s)`,
     }
   }
 

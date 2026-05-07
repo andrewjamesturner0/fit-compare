@@ -119,6 +119,48 @@ describe('alignPair', () => {
     expect(alignPair(empty, ref).status).toBe('failed')
     expect(alignPair(ref, empty).status).toBe('failed')
   })
+
+  it('passes alignment when residuals are realistic for two power meters', () => {
+    // Two co-recorded power meters: same shape, ~10 W RMSE noise.
+    // Old absolute-MSE threshold (0.5 W^2) rejected this; the variance-
+    // normalised threshold passes it because the residuals are small
+    // relative to the signal's natural variance.
+    const ref = makeSeries(600, 0, powerPattern(600, 0))
+    let seed = 1
+    const rand = () => {
+      seed = (seed * 9301 + 49297) % 233280
+      return seed / 233280
+    }
+    const noisy = (ref.values.power as number[]).map((v) => v + (rand() - 0.5) * 30)
+    const other = makeSeries(600, 0, noisy)
+
+    const result = alignPair(ref, other)
+    expect(result.status).not.toBe('failed')
+    expect(result.segments.length).toBeGreaterThan(0)
+    expect(result.segments[0].offsetSeconds).toBe(0)
+  })
+
+  it('residual metric is scale-invariant', () => {
+    // Same shape with the same proportional noise should give the same
+    // alignment outcome regardless of absolute magnitude.
+    const refSmall = makeSeries(600, 0, powerPattern(600, 0))
+    const refLarge = makeSeries(
+      600,
+      0,
+      (refSmall.values.power as number[]).map((v) => v * 1000),
+    )
+    const otherSmall = makeSeries(600, 0, powerPattern(600, 5))
+    const otherLarge = makeSeries(
+      600,
+      0,
+      (otherSmall.values.power as number[]).map((v) => v * 1000),
+    )
+
+    const small = alignPair(refSmall, otherSmall)
+    const large = alignPair(refLarge, otherLarge)
+    expect(small.status).toBe(large.status)
+    expect(small.segments[0].offsetSeconds).toBe(large.segments[0].offsetSeconds)
+  })
 })
 
 describe('alignAll', () => {
