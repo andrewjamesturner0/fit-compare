@@ -151,6 +151,29 @@ describe('parseFitFile', () => {
     expect(r.speed).toBeNull()
   })
 
+  it('handles Date object timestamps (the format fit-file-parser actually emits)', async () => {
+    // fit-file-parser binary.js builds timestamps as `new Date(...)`. Number(date)
+    // gives Unix ms; the parser must keep that as ms (the rest of the pipeline
+    // treats record timestamps as ms).
+    const date = new Date(Date.UTC(2024, 5, 15, 10, 30, 0))
+    const expectedMs = date.getTime()
+
+    mockParseAsync.mockResolvedValueOnce({
+      file_creator: {},
+      activity: {},
+      sessions: [{ start_time: date, sport: 'cycling' }],
+      records: [
+        { timestamp: date, power: 150 },
+        { timestamp: new Date(expectedMs + 1000), power: 160 },
+      ],
+    })
+
+    const result = await parseFitFile(makeBlob(200))
+    expect(result.status).toBe('ok')
+    expect(result.session!.records[0].timestamp).toBe(expectedMs)
+    expect(result.session!.records[1].timestamp).toBe(expectedMs + 1000)
+  })
+
   it('handles numeric timestamps (FIT epoch seconds)', async () => {
     // FIT epoch is 1989-12-31, so a timestamp like 1080000000 is ~2024
     const fitEpochSeconds = Math.floor(Date.UTC(2024, 5, 15, 10, 30, 0) / 1000) + 631065600

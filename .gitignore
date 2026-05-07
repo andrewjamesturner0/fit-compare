@@ -28,3 +28,6 @@ todo.md
 
 
 .codex
+
+# Local example FIT files and check script (not committed; used to manually verify behaviour)
+/examples/

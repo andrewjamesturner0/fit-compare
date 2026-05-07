@@ -3,17 +3,23 @@ import type { FitSession, FitRecord, Lap, ParseResult } from './types'
 
 type ParsedData = Awaited<ReturnType<FitParser['parseAsync']>>
 
-function parseTimeString(ts: string): number {
-  // FIT timestamps come as ISO strings or "seconds since FIT epoch" as strings.
-  // The numeric branch handles three cases:
-  //   1. Unix milliseconds (> 100 billion, i.e. ~1.7 trillion for 2024): divide by 1000
-  //   2. FIT epoch seconds (631065600 to 100 billion): subtract FIT epoch (631065600) and scale to ms
+function parseTimeString(ts: string | Date): number {
+  // The fit-file-parser emits Date objects for timestamps (binary.js builds
+  // `new Date(epochSeconds * 1000 + GarminTimeOffset)`), but the type signature
+  // is `string`. Number(date) coerces to Unix ms, so the same numeric branches
+  // below cover both Date inputs and stringified numerics.
+  //
+  // The numeric branch handles three cases, all returning Unix milliseconds:
+  //   1. Unix ms (> 100 billion, i.e. ~1.7 trillion for 2024): pass through
+  //   2. FIT epoch seconds (>= 631065600 and <= 100 billion): subtract FIT
+  //      epoch (631065600) and scale to ms
   //   3. Unix seconds (< 631065600): multiply by 1000
-  // Threshold 100e9 cleanly separates Unix ms (~1.7e12) from FIT epoch seconds (~1.1e9 in 2024).
+  // Threshold 100e9 cleanly separates Unix ms (~1.7e12) from FIT epoch
+  // seconds (~1.1e9 in 2024).
   const num = Number(ts)
   if (!Number.isNaN(num) && num > 0) {
     if (num > 100_000_000_000) {
-      return num / 1000 // Unix milliseconds -> seconds
+      return num // already Unix ms
     }
     if (num >= 631065600) {
       return (num - 631065600) * 1000 // FIT epoch seconds -> Unix ms
@@ -21,7 +27,7 @@ function parseTimeString(ts: string): number {
     return num * 1000 // Unix seconds -> ms
   }
   // Try ISO string parse
-  const parsed = Date.parse(ts)
+  const parsed = Date.parse(ts as string)
   if (!Number.isNaN(parsed)) return parsed
   return 0
 }
