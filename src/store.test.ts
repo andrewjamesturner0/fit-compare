@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useStore } from './store'
 
-// Mock the parser
-vi.mock('./parser', () => ({
-  parseFitFile: vi.fn(),
+// Mock the parser dispatcher
+vi.mock('./parse', () => ({
+  parseFile: vi.fn(),
 }))
 
 // Mock the resampler
@@ -21,7 +21,9 @@ vi.mock('./resample', () => ({
   }),
 }))
 
-import { parseFitFile } from './parser'
+import { parseFile } from './parse'
+
+const parseFitFile = parseFile
 
 function resetStore() {
   useStore.setState({

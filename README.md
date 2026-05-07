@@ -1,13 +1,13 @@
 # FIT Compare
 
-A client-side single-page webapp that parses multiple .fit cycling files, auto-aligns their timestamps, overlays them on an interactive graph, and computes descriptive statistics to assess how closely the recordings match.
+A client-side single-page webapp that parses multiple .fit and .tcx cycling files, auto-aligns their timestamps, overlays them on an interactive graph, and computes descriptive statistics to assess how closely the recordings match.
 
-Primary use case: comparing power meters on the same ride.
+Primary use case: comparing power meters on the same ride. Mixing formats is supported - e.g. comparing a head unit's .fit recording against the matching TrainerRoad .tcx export.
 
 ## Usage
 
 1. Open the app in a browser
-2. Drop one or more `.fit` files onto the drop zone (or click to browse)
+2. Drop one or more `.fit` or `.tcx` files onto the drop zone (or click to browse)
 3. Files are automatically parsed and aligned
 4. Use the metric selector to switch between power, cadence, heart rate, speed, elevation, and temperature
 5. Zoom by scrolling; pan by click-dragging
@@ -28,7 +28,9 @@ npm run preview  # preview production build
 
 ### Data pipeline
 
-`File -> parser.ts -> FitSession -> resample.ts -> 1 Hz ResampledSeries -> align.ts -> OffsetSegment[] -> graph + stats`
+`File -> parse.ts (dispatch by extension to parser.ts for .fit or tcx.ts for .tcx) -> FitSession -> resample.ts -> 1 Hz ResampledSeries -> align.ts -> OffsetSegment[] -> graph + stats`
+
+Both parsers produce the same `FitSession` shape, so every downstream stage is format-agnostic. .tcx parsing reads <Trackpoint> elements via DOMParser and pulls power and speed from the Garmin ActivityExtension v2 namespace (typically prefixed `ns3:`).
 
 ### Alignment
 

@@ -6,15 +6,18 @@ FIT Compare is a single-page web application that takes multiple .fit cycling fi
 
 The application runs entirely in the browser. There is no server, no database, no user accounts, no file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero server, zero persistence) shapes every architectural choice. The app is a static set of HTML, CSS, and JS files; it can be served from any HTTP server or opened from a `file://` URL in a pinch (though `file://` is not officially supported).
 
-A user drops one or more .fit files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart with zoom, pan, and series toggling. A statistics panel below the chart computes per-file descriptive stats and pairwise comparisons (Pearson r, mean absolute error, mean percentage error); dragging on the graph creates a time-range selection and the panel adds a second block recomputed over only that range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
+A user drops one or more .fit or .tcx files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart with zoom, pan, and series toggling. A statistics panel below the chart computes per-file descriptive stats and pairwise comparisons (Pearson r, mean absolute error, mean percentage error); dragging on the graph creates a time-range selection and the panel adds a second block recomputed over only that range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
 
 ## 2. The N-second architecture
 
 ```
-  .fit files dropped by user
+  .fit / .tcx files dropped by user
       |
       v
-  parser.ts          -- binary parse (fit-file-parser) -> FitSession + FitRecord[]
+  parse.ts           -- dispatch by extension
+      |
+      +-- parser.ts  -- binary FIT parse (fit-file-parser) -> FitSession + FitRecord[]
+      +-- tcx.ts     -- XML TCX parse (DOMParser)        -> FitSession + FitRecord[]
       |
       v
   resample.ts        -- 1 Hz null-filled grid -> ResampledSeries
@@ -114,24 +117,37 @@ The segment-based model is what allows the UI to display and edit per-pause offs
 
 The app has no `localStorage`, no `IndexedDB`, no server-sent state. The primary use case is loading two or three files, comparing them, and closing the tab. Adding persistence would require a serialisation story for binary FIT file data, version migration, and stale-state detection; none of that pays for itself in a comparison tool.
 
-All timestamps are stored as Unix epoch milliseconds. The raw FIT timestamps come in as ISO strings or FIT-epoch seconds; `parser.ts` normalises everything to the same format. Two files recorded in different time zones still compare correctly because the alignment algorithm operates on absolute timestamps.
+All timestamps are stored as Unix epoch milliseconds. The raw FIT timestamps arrive as `Date` objects (the library builds them from FIT-epoch seconds), and TCX timestamps arrive as ISO 8601 strings; both parsers normalise to Unix ms before handing the records downstream. Two files recorded in different time zones still compare correctly because the alignment algorithm operates on absolute timestamps.
 
 `ResampledSeries.values` is `Record<MetricKey, (number | null)[]>`, not `Array<{ timestamp: number, power: number, ... }>`. The column-oriented layout is what the alignment algorithm needs (it extracts a single metric's array and cross-correlates on it). Row-oriented data would require an extra projection step on every correlation attempt.
 
 Coasting power on a bike is zero watts; it is real data, not a missing sensor reading. The stats module does not filter zeros from mean, max, min, stddev, or pairwise comparisons. MPE excludes near-zero reference values (threshold 0.01) to avoid division blow-up, but this is an MPE-specific rule, not a general zero-stripping policy.
 
-## 5. FIT parsing
+## 5. Parsing FIT and TCX
 
-`src/parser.ts` (132 lines) wraps the `fit-file-parser` library, which handles the binary FIT format. The library requires an `ArrayBuffer`, so the parser first reads the dropped `File` into an `ArrayBuffer` via `file.arrayBuffer()`. It configures the parser with `force: true` (continue on errors, don't abort on malformed records), metric units (metres, m/s, Celsius), and `mode: 'both'` (records available both inside laps and at the root level).
+`src/parse.ts` is a thin dispatcher: it inspects the file extension and routes to either `src/parser.ts` (FIT, binary) or `src/tcx.ts` (TCX, XML). Both parsers return the same `ParseResult` containing a `FitSession`, so every downstream module is format-agnostic.
 
-The most finicky part of parsing is timestamp normalisation. FIT timestamps can arrive as:
-- ISO 8601 strings (`"2024-06-15T10:30:00Z"`)
-- FIT epoch seconds (seconds since 1989-12-31)
-- Unix seconds (already in a Unix-like range)
+### 5.1 FIT parsing
 
-`parseTimeString` handles all three by checking the numeric magnitude and converting to Unix milliseconds. The FIT epoch offset (631065600 seconds between 1989-12-31 and 1970-01-01) is hard-coded; this is a stable constant defined by the FIT specification.
+`src/parser.ts` wraps the `fit-file-parser` library, which handles the binary FIT format. The library requires an `ArrayBuffer`, so the parser first reads the dropped `File` into an `ArrayBuffer` via `file.arrayBuffer()`. It configures the parser with `force: true` (continue on errors, don't abort on malformed records), metric units (metres, m/s, Celsius), and `mode: 'both'` (records available both inside laps and at the root level).
 
-The parser returns a `ParseResult` with status `ok`, `warning`, or `error`. Errors are always caught (the try/catch wraps the entire operation) so a corrupt file never crashes the app. Warnings are generated for files with zero records or files where no record contains power data (the latter is important because it degrades alignment quality). The status propagates to the file card in the UI as a coloured badge.
+The most finicky part is timestamp normalisation. The library emits `record.timestamp` as a `Date` object (`new Date(epochSeconds * 1000 + GarminTimeOffset)` in its `binary.js`); other producers may hand back ISO strings or numeric strings (FIT epoch seconds or Unix seconds). `parseTimeString` covers all of these by branching on the numeric magnitude after `Number(ts)` coercion (which also handles `Date` -> Unix ms automatically), and by falling back to `Date.parse` for ISO strings. The FIT epoch offset (631065600 seconds between 1989-12-31 and 1970-01-01) is hard-coded; this is a stable constant defined by the FIT specification.
+
+### 5.2 TCX parsing
+
+`src/tcx.ts` parses the XML using the browser's `DOMParser`. TCX is a Garmin format used by software exporters like TrainerRoad. The parser walks `<Activity>/<Lap>/<Track>/<Trackpoint>` elements directly (matching by local name so any namespace prefix works) and pulls:
+
+- `<Time>` -> ISO 8601, normalised via `Date.parse`
+- `<HeartRateBpm><Value>` -> `heartRate`
+- direct `<Cadence>` -> `cadence`
+- `<DistanceMeters>` -> `distance`
+- `<AltitudeMeters>` -> `elevation`
+- `<Extensions>/<TPX>/<Watts>` -> `power` (Garmin ActivityExtension v2 namespace; commonly seen with prefix `ns3:`)
+- `<Extensions>/<TPX>/<Speed>` -> `speed`
+
+TCX has no temperature field, so `temperature` is always null. The parser also extracts `Activity[Sport]`, `Activity/Id` (start time), and `Activity/Creator/Name` (device name; e.g. "TrainerRoad" for an exported indoor session).
+
+Both parsers return `ParseResult` with status `ok`, `warning`, or `error`. Errors are always caught (the try/catch wraps the entire operation) so a corrupt file never crashes the app. Warnings are generated for files with zero records or files where no record contains power data (the latter is important because it degrades alignment quality). The status propagates to the file card in the UI as a coloured badge.
 
 ## 6. The UI layer
 
@@ -140,7 +156,7 @@ The UI is a single-page React app with no routing. Six components compose the pa
 |Component|Job|
 |-|-|
 |`App.tsx`|Top-level layout: header, file-drop zone, alignment-failure banner, metric selector, graph, stats, offset controls.|
-|`FileDropZone.tsx`|Drag-and-drop zone + hidden file input. Displays file cards with colour swatch, device name, record count, parse status, warnings, and remove button.|
+|`FileDropZone.tsx`|Drag-and-drop zone + hidden file input. Filters drops to .fit and .tcx via `isSupportedFile`. Displays file cards with colour swatch, device name, record count, parse status, warnings, and remove button.|
 |`MetricSelector.tsx`|Row of pill buttons for each of six metrics. Greys out metrics absent from all loaded files.|
 |`FitGraph.tsx`|uPlot canvas. Builds shared timeline from union of all files' offset-adjusted timestamps. Handles resize via `ResizeObserver`. Drag = time-range selection (zoom-on-drag is disabled); the brush is two-way bound to the store's `selection` state.|
 |`StatsPanel.tsx`|Per-file descriptive stats and pairwise comparisons against the first file. When `selection` is set, a second block below renders the same tables recomputed over only the selected range, with a "Clear selection" button.|
@@ -174,7 +190,7 @@ The global "Nudge all files" controls add or subtract 1 second from every segmen
 
 The integration point between the algorithmic modules and the UI is the `addFiles` action in the store. When files are dropped:
 
-1. `addFiles` calls `parseFitFile` for each file (sequential, not parallel; the fit-file-parser is not thread-safe).
+1. `addFiles` calls `parseFile` (the dispatcher) for each file (sequential, not parallel; the fit-file-parser is not thread-safe). The dispatcher routes to `parseFitFile` or `parseTcxFile` based on the file's extension.
 2. If parsing succeeds, `resample()` produces a 1 Hz grid from the raw records.
 3. After all files are parsed and resampled, `recomputeAlignment()` runs `alignAll` against the reference file.
 4. Results are stored on each `FileEntry` in the `files[]` array.
@@ -189,7 +205,8 @@ The graph selection is a thin two-way binding over the store's `selection` field
 
 |File|What it tests|Tests|
 |-|-|-|
-|`src/parser.test.ts`|`parseFitFile` with mocked `fit-file-parser`: error, zero records, full records, missing power, optional fields, numeric timestamps.|6|
+|`src/parser.test.ts`|`parseFitFile` with mocked `fit-file-parser`: error, zero records, full records, missing power, optional fields, numeric timestamps, Date-object timestamps (the format the library actually emits).|7|
+|`src/tcx.test.ts`|`parseTcxFile`: full trackpoint extraction, metadata (sport, device, startTime), missing-power-as-null, no-power warning, no-records warning, malformed XML, missing Activity, multi-Lap aggregation, fallback startTime.|9|
 |`src/resample.test.ts`|`resample()` with synthetic `FitSession`: empty, evenly spaced, rounding, gaps, single record, irregular spacing, same-tick overwrite, multi-metric nulls.|8|
 |`src/align.test.ts`|`alignPair` and `alignAll`: known offset, zero offset, single pause, no pauses, no overlap, random noise, empty series, multi-file, mixed success/failure.|9|
 |`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, and the selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps).|18|
@@ -221,7 +238,7 @@ Read the files in this order:
 
 1. `src/types.ts` (102 lines). The entire data vocabulary: `FitRecord`, `FitSession`, `ResampledSeries`, `OffsetSegment`, `AlignmentResult`, `ParseResult`, the metric list, the colour palette. Everything else references these types. Read it first and keep it open.
 
-2. `src/parser.ts` (132 lines). Entry point for external data. Shows how FIT binary becomes `FitSession` and how timestamps are normalised. The `parseFitFile` function is the only export.
+2. `src/parse.ts`, `src/parser.ts`, `src/tcx.ts`. Entry points for external data. `parse.ts` is a tiny dispatcher; `parser.ts` covers the binary FIT format; `tcx.ts` covers the XML TCX format via DOMParser. Both produce the same `FitSession` shape so the rest of the pipeline does not care which format the user dropped.
 
 3. `src/resample.ts` (64 lines). Short and self-contained. Converts a `FitSession`'s irregular records into a uniform 1 Hz grid. The rounding and null-fill logic is the only non-trivial part.
 

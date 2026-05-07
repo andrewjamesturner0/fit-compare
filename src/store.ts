@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { FileEntry, MetricKey, Selection } from './types'
-import { parseFitFile } from './parser'
+import { parseFile } from './parse'
 import { resample } from './resample'
 import { alignAll } from './align'
 
@@ -50,7 +50,7 @@ function clampSelection(selection: Selection | null, files: FileEntry[]): Select
 }
 
 async function parseFileToEntry(file: File, id: string): Promise<FileEntry> {
-  const parseResult = await parseFitFile(file)
+  const parseResult = await parseFile(file)
   let resampledSeries = null
   if (parseResult.status !== 'error' && parseResult.session) {
     resampledSeries = resample(parseResult.session)

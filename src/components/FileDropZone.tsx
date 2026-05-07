@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { getFileColor } from '../types'
 import type { ParseStatus } from '../types'
+import { isSupportedFile, SUPPORTED_EXTENSIONS } from '../parse'
 
 const STATUS_BADGE: Record<ParseStatus, { label: string; cls: string }> = {
   ok: { label: 'OK', cls: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200' },
@@ -27,7 +28,7 @@ export function FileDropZone() {
       e.preventDefault()
       setIsDragging(false)
       const dropped = Array.from(e.dataTransfer.files).filter(
-        (f) => f.name.endsWith('.fit'),
+        (f) => isSupportedFile(f.name),
       )
       if (dropped.length > 0) {
         addFiles(dropped)
@@ -68,16 +69,16 @@ export function FileDropZone() {
         <input
           ref={inputRef}
           type="file"
-          accept=".fit"
+          accept={SUPPORTED_EXTENSIONS.join(',')}
           multiple
           onChange={handleFileSelect}
           className="hidden"
         />
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          Drop .fit files here or click to browse
+          Drop .fit or .tcx files here or click to browse
         </p>
         <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-          Supports Garmin, Wahoo, and Hammerhead FIT files
+          Supports Garmin / Wahoo / Hammerhead FIT files and Garmin TCX exports (e.g. TrainerRoad)
         </p>
       </div>
 
