@@ -5,6 +5,8 @@ import { useStore } from '../store'
 import { getFileColor } from '../types'
 import type { MetricKey, FileEntry, OffsetSegment } from '../types'
 
+const MIN_CHART_HEIGHT = 200
+
 /**
  * Apply per-segment offsets to a record timestamp.
  * Returns the adjusted timestamp, or null if within a gap region.
@@ -146,7 +148,6 @@ export function FitGraph() {
     return {
       title: '',
       width: 0,
-      height: 400,
       series,
       axes: [
         {
@@ -192,8 +193,7 @@ export function FitGraph() {
         ],
       },
       legend: {
-        show: true,
-        live: false,
+        show: false,
       },
     } as uPlot.Options
   }, [activeFiles, setSelection])
@@ -211,16 +211,22 @@ export function FitGraph() {
     if (data[0].length === 0) return
 
     const containerWidth = chartRef.current.clientWidth
-    const plotOpts = { ...opts, width: Math.max(containerWidth, 300) }
+    const containerHeight = chartRef.current.clientHeight
+    const plotOpts = {
+      ...opts,
+      width: Math.max(containerWidth, 300),
+      height: Math.max(containerHeight, MIN_CHART_HEIGHT),
+    }
 
     uplotRef.current = new uPlot(plotOpts, data, chartRef.current)
+    ;(chartRef.current as any).__uplot = uplotRef.current
 
     // Observe resize
     const observer = new ResizeObserver(() => {
       if (chartRef.current && uplotRef.current) {
         uplotRef.current.setSize({
           width: chartRef.current.clientWidth,
-          height: 400,
+          height: Math.max(chartRef.current.clientHeight, MIN_CHART_HEIGHT),
         })
       }
     })
@@ -273,10 +279,10 @@ export function FitGraph() {
           No data for {selectedMetric === 'heartRate' ? 'Heart Rate' : selectedMetric.charAt(0).toUpperCase() + selectedMetric.slice(1)}
         </div>
       ) : (
-        <div ref={chartRef} className="flex-1 w-full" />
+        <div ref={chartRef} className="flex-1 w-full min-h-0" />
       )}
       {activeFiles.length > 0 && (
-        <div className="flex gap-4 px-4 py-2 flex-wrap border-t bg-white" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="flex gap-4 px-4 py-2 flex-wrap border-t bg-white flex-shrink-0" style={{ borderColor: 'var(--border-subtle)' }}>
           {activeFiles.map((f) => (
             <div key={f.id} className="flex items-center gap-1.5">
               <span

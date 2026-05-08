@@ -11,7 +11,7 @@ Primary use case: comparing power meters on the same ride. Mixing formats is sup
 3. Files are automatically parsed and aligned
 4. Use the metric selector to switch between power, cadence, heart rate, speed, elevation, and temperature
 5. Zoom by scrolling; pan by click-dragging
-6. Drag horizontally on the graph to select a time range. The stats panel adds a "Selection" block showing stats restricted to that range, alongside the full-file stats. Click "Clear selection" (or click the graph) to dismiss
+6. Drag horizontally on the graph to select a time range. The stats panel adds a "Selection" block showing stats restricted to that range, alongside the full-file stats. Click "Clear selection" to dismiss
 7. The stats panel below the graph shows descriptive statistics and pairwise comparisons
 8. Expand "Adjust Offsets" to manually correct alignment if auto-alignment gets it wrong
 
