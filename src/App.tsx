@@ -54,7 +54,7 @@ function App() {
         <FitGraph />
 
         {/* Stats panel */}
-        <div className="overflow-y-auto flex-shrink-0 max-h-[50vh]">
+        <div className="overflow-y-auto min-h-0 max-h-[50vh]">
           <StatsPanel />
 
           {/* Offset controls */}

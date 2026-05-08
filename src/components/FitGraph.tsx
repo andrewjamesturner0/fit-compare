@@ -273,7 +273,7 @@ export function FitGraph() {
   }, [selection, data])
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0" style={{ minHeight: MIN_CHART_HEIGHT + 32 }}>
       {!hasMetricData && activeFiles.length > 0 ? (
         <div className="flex-1 flex items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
           No data for {selectedMetric === 'heartRate' ? 'Heart Rate' : selectedMetric.charAt(0).toUpperCase() + selectedMetric.slice(1)}
