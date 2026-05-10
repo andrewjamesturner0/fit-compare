@@ -36,11 +36,11 @@ Both parsers produce the same `FitSession` shape, so every downstream stage is f
 
 The three-pass auto-alignment algorithm:
 
-1. **Global offset** -- cross-correlates power traces (falling back to HR, then speed) over +-5 minutes to find the best global time offset
+1. **Global offset** -- cross-correlates power traces (falling back to HR, then speed) over +-1 minute to find the best global time offset. Clock drift between devices recording the same ride is sub-minute; a wider window picks up spurious local minima when the two files share little common signal. The scan also evaluates offset 0 and pins to it unless the chosen non-zero offset's residual is at least 20% smaller
 2. **Pause detection** -- walks aligned traces and detects contiguous gaps > 10 seconds where one file has data but the other doesn't
 3. **Segment re-anchoring** -- for each post-pause segment, cross-correlates again to find a per-segment correction offset
 
-If correlation confidence is too low, the file falls back to clock-time alignment and a warning is shown.
+If correlation confidence is too low, the file falls back to a single zero-offset segment (raw clock-time alignment) and a warning is shown. "Adjust Offsets" still lets the user nudge the offset manually.
 
 ### Stats
 

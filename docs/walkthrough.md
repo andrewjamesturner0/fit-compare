@@ -41,7 +41,7 @@ Every component reads from and writes to the same Zustand store. There is no pro
 
 ## 3. The alignment algorithm
 
-The alignment engine (`src/align.ts`, 380 lines) is the most complex piece of the application. Its job: given two time series that represent the same ride but were recorded on different devices with different start times and different pause behaviour, find the per-segment time offsets that make them line up.
+The alignment engine (`src/align.ts`, 434 lines) is the most complex piece of the application. Its job: given two time series that represent the same ride but were recorded on different devices with different start times and different pause behaviour, find the per-segment time offsets that make them line up.
 
 ### 3.1 Why three passes instead of one
 
@@ -57,13 +57,15 @@ This is the Option A from the design document's trade-off analysis. The alternat
 
 ### 3.2 Pass 1: Global cross-correlation
 
-The function `findGlobalOffset` slides one file's trace across the other at 1-second steps over a +-5 minute search window. At each offset it computes the sum of squared errors over the overlapping region, normalised by overlap length (so short overlaps are not preferred). It returns the offset that minimises normalised SSE.
+The function `findGlobalOffset` slides one file's trace across the other at 1-second steps over a +-1 minute search window. At each offset it computes a normalised SSE: the residual sum of squares between the aligned traces divided by the reference signal's variance about its own mean over the overlap. The result is dimensionless and scale-free (it is `1 - R^2` of `other` against `ref`), so a single threshold works across metrics with very different units (W, bpm, m/s). It returns the offset that minimises normalised SSE.
 
-The search window of +-5 minutes was chosen because two devices recording the same ride will almost never differ by more than that in absolute clock time; a wider window would increase computation without improving results. The SSE normalisation by overlap length is important; without it, a tiny overlap (10 seconds at the edge of the window) with accidentally matching values could beat a 1000-second overlap with slightly higher raw SSE.
+The search window of +-1 minute (down from an earlier +-5 minutes) was chosen because real clock drift between two devices recording the same ride is sub-minute, and a wider window invites spurious local minima when the two files share little common signal. A spurious 60-second offset on unrelated files was the symptom that motivated the tightening.
+
+To further protect against spurious minima the scan evaluates offset 0 alongside every other candidate, and applies a **bias-to-zero check**: if the best non-zero offset's residual is not at least 20% smaller than the residual at offset 0 (i.e. `bestSSE < 0.8 * zeroSSE`), the function returns offset 0 instead. The intuition is that if shifting the file barely improves the fit, the "best" offset is almost certainly a coincidence; pinning to 0 keeps the answer safe and predictable. The margin (`ZERO_OFFSET_MARGIN = 0.8`) is a tunable constant.
 
 The metric used for alignment is power by default, falling back to heart rate, then speed. This fallback chain exists because not all devices record power. If none of the three are available in both files, alignment fails and the file reverts to clock-time alignment (zero offsets).
 
-The algorithm rejects an alignment if the normalised SSE exceeds 0.5 or the overlap is less than 30 seconds. The SSE threshold of 0.5 is a starting point that needs tuning against real paired recordings; it is a configurable constant (`SSE_FAILURE_THRESHOLD`). The minimum overlap of 30 seconds prevents accidental "good" correlations on tiny data slices.
+The algorithm rejects an alignment if the normalised SSE exceeds 0.5 or the overlap is less than 30 seconds. The SSE threshold of 0.5 is a starting point that needs tuning against real paired recordings; it is a configurable constant (`SSE_FAILURE_THRESHOLD`). The minimum overlap of 30 seconds prevents accidental "good" correlations on tiny data slices. On rejection the file does not vanish from the UI: `alignPair` returns a single zero-offset segment spanning the file's local time range, with status `failed` and a warning describing why. This keeps the file visible on the graph (at clock-time) and gives the manual offset controls a segment to attach to, so the user can nudge it themselves.
 
 ### 3.3 Pass 2: Pause detection
 
@@ -74,6 +76,8 @@ The function tracks which file has the gap and flushes detected pauses when the 
 ### 3.4 Pass 3: Segment re-anchoring
 
 `reanchorSegments` takes the detected pauses and builds a list of time segments bracketed by them. For each post-pause segment, it cross-correlates the relevant slice of both traces (with a narrower +-30 second window, since post-pause drift is small) to find a per-segment correction offset. If the segment is too short (< 10 seconds of overlap) or the correlation is too weak, it keeps the previous segment's offset rather than guessing.
+
+The bias-to-zero gate from Pass 1 is disabled here (`findGlobalOffset` is called with `biasToZero: false`). The gate exists to guard against spurious minima when two files share little common signal, but by Pass 3 we have already accepted that the files align; the only question is per-segment drift. A real post-pause correction of a few seconds may not clear the 20% improvement bar, so leaving the gate on would silently drop legitimate corrections.
 
 The output is an array of `OffsetSegment` objects, each specifying a time range and an offset in whole seconds. A file with no pauses gets a single segment covering its entire duration. A file with two pauses gets three segments with potentially three different offsets.
 
@@ -166,7 +170,7 @@ The UI is a single-page React app with no routing. Six components compose the pa
 
 The graph renders 3,600-14,400 data points per file (1-4 Hz over an hour). At three files, that is up to 43,200 points. Most React charting libraries (Recharts, Chart.js, Nivo) struggle beyond a few thousand points with smooth zoom and pan.
 
-uPlot is purpose-built for dense time-series. It uses a single Canvas element, bypasses the DOM for data rendering, and handles 100k+ points without frame drops. The trade-off is an imperative API; there are no React-style declarative props for data updates. The `FitGraph` component splits uPlot lifecycle into two effects: one keyed on `opts` (which changes only when files are added or removed) destroys and recreates the chart, while a second effect keyed on `data` calls uPlot's `setData()` to update traces in-place. This preserves zoom state and avoids chart flash when the user nudges offsets — a frequent operation that only changes data, not the number of series.
+uPlot is purpose-built for dense time-series. It uses a single Canvas element, bypasses the DOM for data rendering, and handles 100k+ points without frame drops. The trade-off is an imperative API; there are no React-style declarative props for data updates. The `FitGraph` component splits uPlot lifecycle into two effects: one keyed on `opts` (which changes only when files are added or removed) destroys and recreates the chart, while a second effect keyed on `data` calls uPlot's `setData()` to update traces in-place. This preserves zoom state and avoids chart flash when the user nudges offsets, a frequent operation that only changes data, not the number of series.
 
 ### 6.2 Why Zustand
 
@@ -208,7 +212,7 @@ The graph selection is a thin two-way binding over the store's `selection` field
 |`src/parser.test.ts`|`parseFitFile` with mocked `fit-file-parser`: error, zero records, full records, missing power, optional fields, numeric timestamps, Date-object timestamps (the format the library actually emits).|7|
 |`src/tcx.test.ts`|`parseTcxFile`: full trackpoint extraction, metadata (sport, device, startTime), missing-power-as-null, no-power warning, no-records warning, malformed XML, missing Activity, multi-Lap aggregation, fallback startTime.|9|
 |`src/resample.test.ts`|`resample()` with synthetic `FitSession`: empty, evenly spaced, rounding, gaps, single record, irregular spacing, same-tick overwrite, multi-metric nulls.|8|
-|`src/align.test.ts`|`alignPair` and `alignAll`: known offset, zero offset, single pause, no pauses, no overlap, random noise, empty series, multi-file, mixed success/failure.|9|
+|`src/align.test.ts`|`alignPair` and `alignAll`: known offset, zero offset, single pause, no pauses, no overlap, random noise, empty series, multi-file, mixed success/failure, the failed-alignment fallback (single zero-offset segment when one file has data), and bias-to-zero on unrelated workouts.|12|
 |`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, and the selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps).|18|
 |`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching, and selection lifecycle (clamping, out-of-bounds clearing, clearAll/removeFile cleanup).|17|
 |`src/components/StatsPanel.test.tsx`|`StatsPanel` renders the selection block with stats distinct from the full-file stats when a selection is active, and the "Clear selection" button dismisses it.|3|
@@ -242,7 +246,7 @@ Read the files in this order:
 
 3. `src/resample.ts` (64 lines). Short and self-contained. Converts a `FitSession`'s irregular records into a uniform 1 Hz grid. The rounding and null-fill logic is the only non-trivial part.
 
-4. `src/align.ts` (380 lines). The algorithmic core. Start at the exported `alignPair` function and trace through the three passes. The constants at the top are the tuning knobs.
+4. `src/align.ts` (434 lines). The algorithmic core. Start at the exported `alignPair` function and trace through the three passes. The constants at the top are the tuning knobs.
 
 5. `src/stats.ts` (272 lines). `computeFileStats` and `computePairwiseStats`. Shows how alignment offsets are applied to look up values in the resampled grid, how pause regions and nulls are excluded from comparisons, and how an aligned-timebase selection range is translated through per-segment offsets into per-file local windows.
 
