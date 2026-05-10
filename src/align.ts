@@ -2,12 +2,19 @@ import type { ResampledSeries, OffsetSegment, AlignmentResult, MetricKey } from 
 import { ALIGNMENT_METRIC_FALLBACK } from './types'
 
 /** Configurable constants */
-const SEARCH_WINDOW_SECONDS = 300 // ±5 minutes
+const SEARCH_WINDOW_SECONDS = 60 // ±1 minute. Real clock drift between
+// devices recording the same ride is sub-minute; a wider window invites
+// spurious local minima when two files share little signal in common.
 const PASS3_SEARCH_WINDOW_SECONDS = 30 // ±30 seconds
 const MIN_OVERLAP_SECONDS = 30
 const PASS3_MIN_OVERLAP_SECONDS = 10
 const PAUSE_GAP_THRESHOLD_SECONDS = 10
 const SSE_FAILURE_THRESHOLD = 0.5
+// Bias-to-zero margin: only accept a non-zero offset if its residual is at
+// least this much smaller than the residual at offset 0. Otherwise pin to
+// 0 - if moving the file barely improves the fit, the "best" offset is
+// almost certainly a spurious match.
+const ZERO_OFFSET_MARGIN = 0.8
 
 /**
  * Pick the best alignment metric available in both series.
@@ -113,17 +120,35 @@ function findGlobalOffset(
   other: ResampledSeries,
   metric: MetricKey,
   windowSeconds: number,
+  biasToZero: boolean,
 ): { offset: number; bestSSE: number } {
   let bestOffset = 0
   let bestSSE = Infinity
+  let zeroSSE = Infinity
 
   for (let offset = -windowSeconds; offset <= windowSeconds; offset++) {
     const aligned = getAlignedTrace(ref, other, metric, offset)
     const sse = normalizedSSE(ref.values[metric], aligned)
+    if (offset === 0) zeroSSE = sse
     if (sse < bestSSE) {
       bestSSE = sse
       bestOffset = offset
     }
+  }
+
+  // Bias to zero (pass 1 only): if the best offset is barely better than
+  // offset 0, pin to 0. Protects against spurious local minima when the two
+  // files don't share enough common signal for cross-correlation to
+  // discriminate. Pass 3 disables this because by then we've already accepted
+  // a real alignment exists; small post-pause corrections should not be
+  // suppressed just for being small.
+  if (
+    biasToZero
+    && bestOffset !== 0
+    && Number.isFinite(zeroSSE)
+    && bestSSE >= zeroSSE * ZERO_OFFSET_MARGIN
+  ) {
+    return { offset: 0, bestSSE: zeroSSE }
   }
 
   return { offset: bestOffset, bestSSE }
@@ -275,6 +300,7 @@ function reanchorSegments(
         otherSlice,
         metric,
         PASS3_SEARCH_WINDOW_SECONDS,
+        false,
       )
 
       const aligned = getAlignedTrace(refSlice, otherSlice, metric, correction)
@@ -320,36 +346,45 @@ export function alignPair(
   ref: ResampledSeries,
   other: ResampledSeries,
 ): AlignmentResult {
+  // Always emit at least one segment so the graph and the manual offset
+  // controls have something to attach to. The fallback segment spans the
+  // file's local time range with offset 0 (i.e. raw clock-time alignment).
+  const failedResult = (warning: string): AlignmentResult => ({
+    status: 'failed',
+    segments: other.timestamps.length > 0
+      ? [{
+          fromTime: other.timestamps[0],
+          toTime: other.timestamps[other.timestamps.length - 1],
+          offsetSeconds: 0,
+        }]
+      : [],
+    warning,
+  })
+
   if (
     ref.timestamps.length === 0
     || other.timestamps.length === 0
   ) {
-    return { status: 'failed', segments: [], warning: 'Empty trace — cannot align' }
+    return failedResult('Empty trace — cannot align')
   }
 
   const metric = pickAlignmentMetric(ref, other)
   if (!metric) {
-    return {
-      status: 'failed',
-      segments: [],
-      warning: 'No common alignment metric (power, HR, or speed) found in both files',
-    }
+    return failedResult('No common alignment metric (power, HR, or speed) found in both files')
   }
 
   // Pass 1: Global offset
   const { offset: globalOffset, bestSSE } = findGlobalOffset(
-    ref, other, metric, SEARCH_WINDOW_SECONDS,
+    ref, other, metric, SEARCH_WINDOW_SECONDS, true,
   )
 
   const aligned = getAlignedTrace(ref, other, metric, globalOffset)
   const overlap = overlapLength(ref.values[metric], aligned)
 
   if (bestSSE >= SSE_FAILURE_THRESHOLD || overlap < MIN_OVERLAP_SECONDS) {
-    return {
-      status: 'failed',
-      segments: [],
-      warning: `Could not find reliable alignment (residual ratio=${bestSSE.toFixed(2)}, overlap=${overlap}s)`,
-    }
+    return failedResult(
+      `Could not find reliable alignment (residual ratio=${bestSSE.toFixed(2)}, overlap=${overlap}s)`,
+    )
   }
 
   // Pass 2: Pause detection

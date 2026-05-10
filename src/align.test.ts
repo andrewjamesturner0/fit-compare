@@ -85,7 +85,7 @@ describe('alignPair', () => {
     expect(result.segments.length).toBe(1)
   })
 
-  it('returns failed when no overlap exists', () => {
+  it('returns failed-with-zero-offset segment when no overlap exists', () => {
     // ref has power, other has none
     const ref = makeSeries(300, 0, powerPattern(300, 0))
     const other: ResampledSeries = {
@@ -96,6 +96,10 @@ describe('alignPair', () => {
     const result = alignPair(ref, other)
     expect(result.status).toBe('failed')
     expect(result.warning).toBeDefined()
+    // Failed alignment now emits a single zero-offset fallback segment so
+    // the manual offset controls have something to attach to.
+    expect(result.segments).toHaveLength(1)
+    expect(result.segments[0].offsetSeconds).toBe(0)
   })
 
   it('returns failed when traces are too short for reliable correlation', () => {
@@ -107,6 +111,8 @@ describe('alignPair', () => {
     const result2 = alignPair(ref, other2)
     // Random noise won't correlate with sine wave — should fail
     expect(result2.status).toBe('failed')
+    expect(result2.segments).toHaveLength(1)
+    expect(result2.segments[0].offsetSeconds).toBe(0)
   })
 
   it('handles empty series', () => {
@@ -116,8 +122,28 @@ describe('alignPair', () => {
     }
     const ref = makeSeries(100, 0, powerPattern(100, 0))
 
+    // Empty other has no timestamps to span, so the fallback segment list
+    // is empty in that direction; non-empty other still gets one segment.
     expect(alignPair(empty, ref).status).toBe('failed')
+    expect(alignPair(empty, ref).segments).toHaveLength(1)
     expect(alignPair(ref, empty).status).toBe('failed')
+    expect(alignPair(ref, empty).segments).toHaveLength(0)
+  })
+
+  it('does not drift to a spurious offset when files share little signal', () => {
+    // Two unrelated workouts that happen to share a clock window: ramp up
+    // (100..400 W) vs steady ~150 W. There is no real time-alignment to
+    // find. The algorithm should pin to offset 0 rather than chase a
+    // spurious local minimum.
+    const ramp: (number | null)[] = []
+    for (let i = 0; i < 600; i++) ramp.push(100 + i * 0.5)
+    const ref = makeSeries(600, 0, ramp)
+    const steady: (number | null)[] = []
+    for (let i = 0; i < 600; i++) steady.push(150)
+    const other = makeSeries(600, 0, steady)
+
+    const result = alignPair(ref, other)
+    expect(result.segments[0].offsetSeconds).toBe(0)
   })
 
   it('passes alignment when residuals are realistic for two power meters', () => {
