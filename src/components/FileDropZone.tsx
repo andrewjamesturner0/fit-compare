@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { getFileColor } from '../types'
-import type { ParseStatus } from '../types'
+import type { ParseStatus, AlignmentResult, FileEntry } from '../types'
 import { isSupportedFile, SUPPORTED_EXTENSIONS } from '../parse'
 
 const STATUS_BADGE: Record<ParseStatus, { label: string; cls: string }> = {
@@ -10,14 +10,50 @@ const STATUS_BADGE: Record<ParseStatus, { label: string; cls: string }> = {
   error: { label: 'Error', cls: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200' },
 }
 
+const ALIGN_BADGE_CLS: Record<'ok' | 'failed' | 'ref', string> = {
+  ref: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200',
+  ok: 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200',
+  failed: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
+}
+
 function formatTimestamp(ts: number): string {
   if (!ts) return '?'
   const d = new Date(ts)
   return d.toLocaleString()
 }
 
+function formatOffset(seconds: number): string {
+  if (seconds === 0) return '+0s'
+  const sign = seconds > 0 ? '+' : '-'
+  const abs = Math.abs(seconds)
+  if (abs < 60) return `${sign}${abs}s`
+  const m = Math.floor(abs / 60)
+  const s = abs % 60
+  return s === 0 ? `${sign}${m}m` : `${sign}${m}m${s}s`
+}
+
+function alignmentLabel(file: FileEntry, isReference: boolean): { label: string; cls: string } | null {
+  if (!file.alignmentResult) return null
+  if (isReference) return { label: 'Ref', cls: ALIGN_BADGE_CLS.ref }
+
+  const result: AlignmentResult = file.alignmentResult
+  const offsets = result.segments.map((s) => s.offsetSeconds)
+  const allSame = offsets.length > 0 && offsets.every((o) => o === offsets[0])
+  const summary = offsets.length === 0
+    ? '?'
+    : allSame
+      ? formatOffset(offsets[0])
+      : 'varies'
+
+  if (result.status === 'failed') {
+    return { label: `Manual (${summary})`, cls: ALIGN_BADGE_CLS.failed }
+  }
+  return { label: `Aligned ${summary}`, cls: ALIGN_BADGE_CLS.ok }
+}
+
 export function FileDropZone() {
   const files = useStore((s) => s.files)
+  const referenceFileId = useStore((s) => s.referenceFileId)
   const addFiles = useStore((s) => s.addFiles)
   const removeFile = useStore((s) => s.removeFile)
   const [isDragging, setIsDragging] = useState(false)
@@ -89,6 +125,7 @@ export function FileDropZone() {
             const status = f.parseResult?.status ?? 'error'
             const badge = STATUS_BADGE[status]
             const session = f.parseResult?.session
+            const align = alignmentLabel(f, f.id === referenceFileId)
             return (
               <div
                 key={f.id}
@@ -126,6 +163,14 @@ export function FileDropZone() {
                 >
                   {badge.label}
                 </span>
+                {align && (
+                  <span
+                    className={`text-xs px-1.5 py-0.5 rounded ${align.cls}`}
+                    title={f.alignmentResult?.warning ?? undefined}
+                  >
+                    {align.label}
+                  </span>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
