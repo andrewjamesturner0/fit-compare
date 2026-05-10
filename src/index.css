@@ -42,3 +42,17 @@ body {
   font-family: 'IBM Plex Sans', system-ui, sans-serif;
   font-size: 12px;
 }
+
+/*
+ * Selection-brush styling. uPlot's default .u-select is an opaque mid-grey
+ * rectangle that obscures the data behind it. We use it as a persistent
+ * highlight (cursor.drag.setScale = false), so style it down to a faint
+ * tinted rectangle with vertical edge bars to mark the boundaries.
+ */
+.uplot .u-select {
+  background: rgba(0, 114, 178, 0.08);
+  border-left: 1px solid rgba(0, 114, 178, 0.55);
+  border-right: 1px solid rgba(0, 114, 178, 0.55);
+  border-top: none;
+  border-bottom: none;
+}
