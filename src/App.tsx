@@ -40,8 +40,7 @@ function App() {
       {/* Alignment failure warning */}
       {hasAlignmentFailure && (
         <div className="px-4 py-2 text-sm border-b" style={{ background: 'var(--warn-bg)', borderColor: 'var(--warn-border)', color: 'var(--warn-text)' }}>
-          Could not auto-align one or more files. Clock-time alignment in use.
-          Try adjusting offsets manually.
+          Auto-alignment failed for one or more files; defaulting to clock-time. Use Adjust Offsets to nudge manually.
         </div>
       )}
 
