@@ -3,28 +3,20 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { useStore } from '../store'
 import { getFileColor } from '../types'
-import type { MetricKey, FileEntry, OffsetSegment } from '../types'
+import type { MetricKey, FileEntry } from '../types'
+import { localToAligned } from '../alignmentTime'
 
 const MIN_CHART_HEIGHT = 200
 
 /**
  * Apply per-segment offsets to a record timestamp.
- * Returns the adjusted timestamp, or null if within a gap region.
+ * Returns the adjusted (aligned) timestamp.
  */
 function adjustTimestamp(
   timestamp: number,
-  segments: OffsetSegment[],
-): number | null {
-  for (const seg of segments) {
-    if (timestamp >= seg.fromTime && timestamp <= seg.toTime) {
-      return timestamp + seg.offsetSeconds * 1000
-    }
-  }
-  // Fall back to first offset if timestamp is before first segment
-  if (segments.length > 0) {
-    return timestamp + segments[0].offsetSeconds * 1000
-  }
-  return timestamp
+  segments: import('../types').OffsetSegment[],
+): number {
+  return localToAligned(timestamp, segments)
 }
 
 /**
@@ -62,9 +54,7 @@ function buildChartData(
       const val = r[metric]
       if (val === null || val === undefined) continue
       const adjustedTs = adjustTimestamp(r.timestamp, segments)
-      if (adjustedTs !== null) {
-        pairs.push({ ts: adjustedTs, val })
-      }
+      pairs.push({ ts: adjustedTs, val })
     }
     fileData.push(pairs)
   }

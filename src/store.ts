@@ -3,6 +3,7 @@ import type { FileEntry, MetricKey, Selection } from './types'
 import { parseFile } from './parse'
 import { resample } from './resample'
 import { alignAll } from './align'
+import { segmentAlignedWindow } from './alignmentTime'
 
 let nextId = 1
 
@@ -19,8 +20,8 @@ function computeDataExtent(files: FileEntry[]): { min: number; max: number } | n
     if (segments.length > 0) {
       const first = segments[0]
       const last = segments[segments.length - 1]
-      const lo = first.fromTime + first.offsetSeconds * 1000
-      const hi = last.toTime + last.offsetSeconds * 1000
+      const lo = segmentAlignedWindow(first).from
+      const hi = segmentAlignedWindow(last).to
       if (lo < min) min = lo
       if (hi > max) max = hi
     }

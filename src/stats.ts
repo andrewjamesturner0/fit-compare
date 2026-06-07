@@ -1,4 +1,9 @@
 import type { ResampledSeries, MetricKey, AlignmentResult } from './types'
+import {
+  alignedToLocal,
+  alignedRangeToLocalWindows,
+  isInPause,
+} from './alignmentTime'
 
 const MPE_EPSILON = 0.01
 
@@ -38,7 +43,7 @@ export function computeFileStats(
 
   let nonNull: number[]
   if (range) {
-    const localWindows = alignedRangeToLocalWindows(range, alignment)
+    const localWindows = alignedRangeToLocalWindows(range, alignment?.segments ?? [])
     if (localWindows.length === 0) {
       return { mean: null, max: null, min: null, stddev: null, n: 0 }
     }
@@ -81,63 +86,9 @@ export function computeFileStats(
 }
 
 /**
- * Translate an aligned-timebase range into per-segment local-timebase windows.
- * For each segment s, the displayed window is
- *   [s.fromTime + s.offsetSeconds*1000, s.toTime + s.offsetSeconds*1000]
- * (in aligned time). Intersect with the requested range and subtract the
- * offset to get back to local time. With no segments (e.g. unaligned single
- * file) the range is treated as already on the local timebase.
- */
-function alignedRangeToLocalWindows(
-  range: { fromTime: number; toTime: number },
-  alignment: AlignmentResult | null,
-): { from: number; to: number }[] {
-  const segments = alignment?.segments ?? []
-  if (segments.length === 0) {
-    return [{ from: range.fromTime, to: range.toTime }]
-  }
-  const out: { from: number; to: number }[] = []
-  for (const s of segments) {
-    const offsetMs = s.offsetSeconds * 1000
-    const segDisplayedFrom = s.fromTime + offsetMs
-    const segDisplayedTo = s.toTime + offsetMs
-    const lo = Math.max(range.fromTime, segDisplayedFrom)
-    const hi = Math.min(range.toTime, segDisplayedTo)
-    if (lo <= hi) out.push({ from: lo - offsetMs, to: hi - offsetMs })
-  }
-  return out
-}
-
-/**
- * Check if a timestamp falls inside any pause region of a file.
- * A timestamp is "in a pause" if it's inside a gap that the other file has.
- * Here we just check if the timestamp is inside any OffsetSegment gap.
- *
- * For pause exclusion: we use the AlignmentResult segments.
- * A pause exists between segments when timestamps don't have contiguous offset.
- * We don't directly use OffsetSegment for pause detection — instead,
- * we detect pauses from the gap file's null runs in the resampled data.
- */
-function timestampInPause(
-  timestamp: number,
-  alignment: AlignmentResult | null,
-): boolean {
-  if (!alignment || alignment.segments.length <= 1) return false
-
-  // Check if this timestamp falls between any segment boundaries
-  // Segments are contiguous: seg[i].toTime < seg[i+1].fromTime means a gap
-  const segments = alignment.segments
-  for (let i = 0; i < segments.length - 1; i++) {
-    if (timestamp > segments[i].toTime && timestamp < segments[i + 1].fromTime) {
-      return true
-    }
-  }
-
-  return false
-}
-
-/**
- * Get the aligned value at a given reference-grid timestamp for a file.
+ * Get the aligned value at a given reference-grid (aligned) timestamp for a
+ * file.  Uses `alignedToLocal` to translate the aligned timestamp through
+ * the file's segment offsets before looking up the local grid.
  */
 function getAlignedValue(
   series: ResampledSeries,
@@ -146,32 +97,8 @@ function getAlignedValue(
   alignment: AlignmentResult | null,
   tsIndex?: Map<number, number>,
 ): number | null {
-  // Apply alignment offset to determine what local timestamp to look up
   const segments = alignment?.segments ?? []
-  let localTs = refTimestamp
-
-  // Find which segment this refTimestamp falls into and subtract the offset
-  for (const seg of segments) {
-    if (refTimestamp >= seg.fromTime && refTimestamp <= seg.toTime) {
-      localTs = refTimestamp - seg.offsetSeconds * 1000
-      break
-    }
-  }
-
-  // If refTimestamp is before first segment, subtract first segment's offset
-  if (segments.length > 0 && refTimestamp < segments[0].fromTime) {
-    localTs = refTimestamp - segments[0].offsetSeconds * 1000
-  }
-  // If after last segment, use last segment's offset
-  if (
-    segments.length > 0
-    && refTimestamp > segments[segments.length - 1].toTime
-  ) {
-    localTs =
-      refTimestamp - segments[segments.length - 1].offsetSeconds * 1000
-  }
-
-  // Use pre-built index map when available (O(1)), fall back to indexOf (O(n))
+  const localTs = alignedToLocal(refTimestamp, segments)
   const idx = tsIndex
     ? (tsIndex.get(localTs) ?? -1)
     : series.timestamps.indexOf(localTs)
@@ -222,14 +149,14 @@ export function computePairwiseStats(
     const refVal = refValues[i]
     if (refVal === null) continue
 
-    // Skip if ref is in a pause
-    if (timestampInPause(ts, refAlignment)) continue
+    // Skip if ref is in a pause (ts is aligned; ref local == aligned)
+    if (isInPause(ts, refAlignment?.segments ?? [])) continue
 
     const otherVal = getAlignedValue(otherSeries, metric, ts, otherAlignment, otherTsIndex)
     if (otherVal === null) continue
 
-    // Skip if other is in a pause
-    if (timestampInPause(ts, otherAlignment)) continue
+    // Skip if other is in a pause (ts is aligned; isInPause requires aligned ts)
+    if (isInPause(ts, otherAlignment?.segments ?? [])) continue
 
     pairs.push({ ref: refVal, other: otherVal })
   }
