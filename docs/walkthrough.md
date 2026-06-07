@@ -41,7 +41,7 @@ Every component reads from and writes to the same Zustand store. There is no pro
 
 ## 3. The alignment algorithm
 
-The alignment engine (`src/align.ts`, 434 lines) is the most complex piece of the application. Its job: given two time series that represent the same ride but were recorded on different devices with different start times and different pause behaviour, find the per-segment time offsets that make them line up.
+The alignment engine (`src/align.ts`) is the most complex piece of the application. Its job: given two time series that represent the same ride but were recorded on different devices with different start times and different pause behaviour, find the per-segment time offsets that make them line up.
 
 ### 3.1 Why three passes instead of one
 
@@ -49,37 +49,47 @@ The obvious approach is a single cross-correlation pass over the entire trace. T
 
 The three-pass approach separates concerns:
 
-1. Find the global offset (Pass 1).
+1. Find the initial pre-pause offset using consecutive reliable windows (Pass 1).
 2. Detect where pauses occurred in either trace (Pass 2).
-3. For each post-pause segment, recompute the offset independently (Pass 3).
+3. For each post-pause segment, search the full manual-offset range and recompute the offset independently (Pass 3).
 
-This is the Option A from the design document's trade-off analysis. The alternative (iterative segment matching) was rejected because its behaviour is harder to inspect and debug at each intermediate stage. The three-pass approach produces inspectable output at every pass.
+### 3.2 Pass 1: Consecutive-window initial anchoring
 
-### 3.2 Pass 1: Global cross-correlation
+A single whole-trace correlation fails when the recording contains multiple offset regimes (e.g. offset 0 before a pause and +133 s afterwards). The algorithm therefore slides a fixed-duration scoring window (180 s) across the reference timeline at a fixed stride (60 s). For each window it finds the best offset within +-1 minute. An offset is accepted as the initial anchor only when at least two consecutive windows agree on the same offset (within 1 s tolerance) and have acceptable quality (normalised SSE <= 0.5, overlap >= 30 s).
 
-The function `findGlobalOffset` slides one file's trace across the other at 1-second steps over a +-1 minute search window. At each offset it computes a normalised SSE: the residual sum of squares between the aligned traces divided by the reference signal's variance about its own mean over the overlap. The result is dimensionless and scale-free (it is `1 - R^2` of `other` against `ref`), so a single threshold works across metrics with very different units (W, bpm, m/s). It returns the offset that minimises normalised SSE.
+This approach finds the pre-pause regime first and requires sustained evidence (multiple windows) rather than a single accidental match. It is robust to a degrading correlation tail (e.g. zero power just before a device pause) because those windows simply fall below the quality threshold and are skipped by the consecutive-window requirement.
 
-The search window of +-1 minute (down from an earlier +-5 minutes) was chosen because real clock drift between two devices recording the same ride is sub-minute, and a wider window invites spurious local minima when the two files share little common signal. A spurious 60-second offset on unrelated files was the symptom that motivated the tightening.
-
-To further protect against spurious minima the scan evaluates offset 0 alongside every other candidate, and applies a **bias-to-zero check**: if the best non-zero offset's residual is not at least 20% smaller than the residual at offset 0 (i.e. `bestSSE < 0.8 * zeroSSE`), the function returns offset 0 instead. The intuition is that if shifting the file barely improves the fit, the "best" offset is almost certainly a coincidence; pinning to 0 keeps the answer safe and predictable. The margin (`ZERO_OFFSET_MARGIN = 0.8`) is a tunable constant.
-
-The metric used for alignment is power by default, falling back to heart rate, then speed. This fallback chain exists because not all devices record power. If none of the three are available in both files, alignment fails and the file reverts to clock-time alignment (zero offsets).
-
-The algorithm rejects an alignment if the normalised SSE exceeds 0.5 or the overlap is less than 30 seconds. The SSE threshold of 0.5 is a starting point that needs tuning against real paired recordings; it is a configurable constant (`SSE_FAILURE_THRESHOLD`). The minimum overlap of 30 seconds prevents accidental "good" correlations on tiny data slices. On rejection the file does not vanish from the UI: `alignPair` returns a single zero-offset segment spanning the file's local time range, with status `failed` and a warning describing why. This keeps the file visible on the graph (at clock-time) and gives the manual offset controls a segment to attach to, so the user can nudge it themselves.
+The same **bias-to-zero check** from the original algorithm still applies: if the agreed non-zero offset's full-timeline residual is not at least 20% smaller than the residual at offset 0, the function returns 0 instead.
 
 ### 3.3 Pass 2: Pause detection
 
-Given the global offset from Pass 1, `detectPauses` walks both aligned traces in lockstep looking for contiguous null-runs longer than 10 seconds in one file where the other file has data. The 10-second threshold (`PAUSE_GAP_THRESHOLD_SECONDS`) was chosen to distinguish real device pauses from brief sensor dropouts (a heart-rate monitor dropping out for 3 seconds is not a pause; it is a sensor glitch that the null-fill in resampling handles).
+Given the initial offset from Pass 1, `detectPauses` walks both aligned traces in lockstep looking for contiguous null-runs longer than 10 seconds in one file where the other file has data. The 10-second threshold (`PAUSE_GAP_THRESHOLD_SECONDS`) was chosen to distinguish real device pauses from brief sensor dropouts (a heart-rate monitor dropping out for 3 seconds is not a pause; it is a sensor glitch that the null-fill in resampling handles).
 
-The function tracks which file has the gap and flushes detected pauses when the gap ends. It handles alternating gaps (a gap in file A, then a gap in file B) by flushing the first pause before starting the second. A trailing pause (gap at the end of the trace) is also captured.
+Each pause is represented by reference-time start/end timestamps and a gap-ownership flag (`'ref'` or `'other'`), not raw array indices, so downstream code can map to either file's local timeline independently.
 
-### 3.4 Pass 3: Segment re-anchoring
+### 3.4 Pass 3: Full-range post-pause re-anchoring
 
-`reanchorSegments` takes the detected pauses and builds a list of time segments bracketed by them. For each post-pause segment, it cross-correlates the relevant slice of both traces (with a narrower +-30 second window, since post-pause drift is small) to find a per-segment correction offset. If the segment is too short (< 10 seconds of overlap) or the correlation is too weak, it keeps the previous segment's offset rather than guessing.
+For each post-pause segment, the algorithm scores a 180-second window starting at the reference timeline's resume point against the **full** other-file timeline. It searches the entire +-300 second range (the same range available in the manual offset controls) rather than the old +-30-second narrow window. This handles real-world cases where a device power-off and restart shifts the effective alignment by over two minutes -- a 30-second search could never recover those jumps.
 
-The bias-to-zero gate from Pass 1 is disabled here (`findGlobalOffset` is called with `biasToZero: false`). The gate exists to guard against spurious minima when two files share little common signal, but by Pass 3 we have already accepted that the files align; the only question is per-segment drift. A real post-pause correction of a few seconds may not clear the 20% improvement bar, so leaving the gate on would silently drop legitimate corrections.
+A candidate post-pause offset is accepted only when it satisfies three gates:
+- **Overlap**: at least 10 seconds of overlapping non-null data.
+- **Quality**: normalised SSE <= 0.5.
+- **Improvement**: the candidate's normalised SSE must be at least 5% lower than the score using the previous segment's offset (`IMPROVEMENT_MARGIN = 0.95`).
 
-The output is an array of `OffsetSegment` objects, each specifying a time range and an offset in whole seconds. A file with no pauses gets a single segment covering its entire duration. A file with two pauses gets three segments with potentially three different offsets.
+If no candidate clears all three gates, the previous offset is kept and no duplicate segment is emitted (the old segment is extended instead).
+The bias-to-zero gate is not applied in Pass 3, since by this pass we have already accepted that the files align.
+
+### 3.5 The local-time segment contract
+
+Every `OffsetSegment` has its `fromTime` and `toTime` on the **owning file's local timeline**, not the reference timeline. This is formalised in `src/alignmentTime.ts` with these helpers:
+
+- `localToAligned(localTs, segments)` -- maps a local timestamp to the aligned display timebase by applying the matching segment's offset.
+- `alignedToLocal(alignedTs, segments)` -- the inverse: maps a reference-grid timestamp back to the owning file's local clock.
+- `segmentAlignedWindow(seg)` -- returns the segment's `[from, to]` range on the aligned timebase.
+- `isInPause(alignedTs, segments)` -- tests whether an aligned timestamp falls inside a pause gap between two segments.
+- `alignedRangeToLocalWindows(range, segments)` -- translates an aligned-time selection range into per-segment local-time windows, respecting each segment's offset.
+
+All graph rendering (`FitGraph`), statistics (`computeFileStats`, `computePairwiseStats`), and store extent computation (`computeDataExtent`) use these shared helpers, eliminating inconsistent duplicate arithmetic.
 
 ### 3.5 Aligning more than two files
 
@@ -212,8 +222,9 @@ The graph selection is a thin two-way binding over the store's `selection` field
 |`src/parser.test.ts`|`parseFitFile` with mocked `fit-file-parser`: error, zero records, full records, missing power, optional fields, numeric timestamps, Date-object timestamps (the format the library actually emits).|7|
 |`src/tcx.test.ts`|`parseTcxFile`: full trackpoint extraction, metadata (sport, device, startTime), missing-power-as-null, no-power warning, no-records warning, malformed XML, missing Activity, multi-Lap aggregation, fallback startTime.|9|
 |`src/resample.test.ts`|`resample()` with synthetic `FitSession`: empty, evenly spaced, rounding, gaps, single record, irregular spacing, same-tick overwrite, multi-metric nulls.|8|
-|`src/align.test.ts`|`alignPair` and `alignAll`: known offset, zero offset, single pause, no pauses, no overlap, random noise, empty series, multi-file, mixed success/failure, the failed-alignment fallback (single zero-offset segment when one file has data), and bias-to-zero on unrelated workouts.|12|
-|`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, and the selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps).|18|
+|`src/align.test.ts`|`alignPair` and `alignAll`: synthetic pause regression (+133s jump), known-offset detection, zero-offset files, single pause, no-pause, no-overlap failure, random-noise failure, empty series, multi-file align, mixed success/failure, unrelated-workout bias-to-zero, scale-invariance, pause in non-reference file, two sequential pauses, >2-minute offset jump recovery, and sensor-dropout rejection.|19|
+|`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps), and multi-segment pairwise lookups with non-zero offsets.|20|
+|`src/alignmentTime.test.ts`|`localToAligned`, `alignedToLocal`, `segmentAlignedWindow`, `isInPause`, `offsetForLocalTs`, `alignedRangeToLocalWindows`: fallback behaviour, multi-segment, negative offsets, large offset gaps (>60 s).|16|
 |`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching, and selection lifecycle (clamping, out-of-bounds clearing, clearAll/removeFile cleanup).|17|
 |`src/components/StatsPanel.test.tsx`|`StatsPanel` renders overall stats with no toggle when there is no selection; uses the selected metric's unit; defaults to Selection scope and hides Overall numbers when a selection is active; switches scope on toggle click; the "Clear selection" button dismisses the selection; pairwise comparisons render only in the demoted strip and only with 2+ files.|8|
 |`src/components/FitGraph.test.tsx`|Smoke test that the component mounts without crashing.|1|
@@ -246,14 +257,16 @@ Read the files in this order:
 
 3. `src/resample.ts` (64 lines). Short and self-contained. Converts a `FitSession`'s irregular records into a uniform 1 Hz grid. The rounding and null-fill logic is the only non-trivial part.
 
-4. `src/align.ts` (434 lines). The algorithmic core. Start at the exported `alignPair` function and trace through the three passes. The constants at the top are the tuning knobs.
+4. `src/align.ts` — the algorithmic core. Start at the exported `alignPair` function and trace through the three passes. The constants at the top are the tuning knobs.
 
-5. `src/stats.ts` (272 lines). `computeFileStats` and `computePairwiseStats`. Shows how alignment offsets are applied to look up values in the resampled grid, how pause regions and nulls are excluded from comparisons, and how an aligned-timebase selection range is translated through per-segment offsets into per-file local windows.
+5. `src/alignmentTime.ts` — shared timestamp-mapping helpers. `localToAligned`, `alignedToLocal`, `segmentAlignedWindow`, `isInPause`, and `alignedRangeToLocalWindows`. The single source of truth for the local-time segment contract; every consumer of `OffsetSegment` uses these.
 
-6. `src/store.ts` (269 lines). The Zustand store. Read `addFiles` to see how parse, resample, and align are chained. Read the offset mutation actions to see how manual edits propagate.
+6. `src/stats.ts` — `computeFileStats` and `computePairwiseStats`. Uses `alignedToLocal`, `alignedRangeToLocalWindows`, and `isInPause` from the shared helpers rather than duplicating offset arithmetic.
 
-7. `src/components/FitGraph.tsx` (307 lines). The hardest UI component. `buildChartData` constructs uPlot's `AlignedData` from raw records with per-segment offset adjustment. The effects manage uPlot lifecycle, data updates, and selection synchronisation.
+7. `src/store.ts` -- the Zustand store. Read `addFiles` to see how parse, resample, and align are chained. Read the offset mutation actions to see how manual edits propagate.
 
-8. `src/App.tsx` (67 lines). The shell. Shows the vertical composition of all components and the alignment-failure banner condition.
+8. `src/components/FitGraph.tsx` -- the hardest UI component. `buildChartData` constructs uPlot's `AlignedData` from raw records with per-segment offset adjustment. The effects manage uPlot lifecycle, data updates, and selection synchronisation.
+
+9. `src/App.tsx` -- the shell. Shows the vertical composition of all components and the alignment-failure banner condition.
 
 That is the whole project.

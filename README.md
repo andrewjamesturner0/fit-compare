@@ -32,7 +32,7 @@ npm run preview  # preview production build
 
 ### Data pipeline
 
-`File -> parse.ts (dispatch by extension to parser.ts for .fit or tcx.ts for .tcx) -> FitSession -> resample.ts -> 1 Hz ResampledSeries -> align.ts -> OffsetSegment[] -> graph + stats`
+`File -> parse.ts (dispatch by extension to parser.ts for .fit or tcx.ts for .tcx) -> FitSession -> resample.ts -> 1 Hz ResampledSeries -> align.ts -> OffsetSegment[] (local-time boundaries via alignmentTime.ts) -> graph + stats`
 
 Both parsers produce the same `FitSession` shape, so every downstream stage is format-agnostic. .tcx parsing reads <Trackpoint> elements via DOMParser and pulls power and speed from the Garmin ActivityExtension v2 namespace (typically prefixed `ns3:`).
 
@@ -40,9 +40,11 @@ Both parsers produce the same `FitSession` shape, so every downstream stage is f
 
 The three-pass auto-alignment algorithm:
 
-1. **Global offset** -- cross-correlates power traces (falling back to HR, then speed) over +-1 minute to find the best global time offset. Clock drift between devices recording the same ride is sub-minute; a wider window picks up spurious local minima when the two files share little common signal. The scan also evaluates offset 0 and pins to it unless the chosen non-zero offset's residual is at least 20% smaller
-2. **Pause detection** -- walks aligned traces and detects contiguous gaps > 10 seconds where one file has data but the other doesn't
-3. **Segment re-anchoring** -- for each post-pause segment, cross-correlates again to find a per-segment correction offset
+1. **Consecutive-window initial anchoring** -- slides a 180-second scoring window across the reference timeline at a 60-second stride, finds the best offset (+-1 minute) per window, and accepts an offset only when at least two consecutive windows agree on it with acceptable quality. This finds the pre-pause alignment regime even when a later pause makes the whole-trace correlation fail.
+2. **Pause detection** -- walks aligned traces and detects contiguous gaps > 10 seconds where one file has data but the other doesn't. Each pause is recorded with reference-timeline timestamps and gap ownership.
+3. **Full-range post-pause re-anchoring** -- for each post-pause segment, searches the entire +-5 minute manual-offset range against a bounded 180-second post-resume window. A new offset is accepted only when it clears overlap, quality, and improvement gates. This recovers large effective-offset jumps (2+ minutes) that the previous +-30-second search could not.
+
+Offset segments use the file's local timeline for their boundaries (not the reference timeline). Shared helpers in `src/alignmentTime.ts` ensure consistent mapping across the graph, stats panel, and store.
 
 If correlation confidence is too low, the file falls back to a single zero-offset segment (raw clock-time alignment) and a warning is shown. "Adjust Offsets" still lets the user nudge the offset manually.
 
