@@ -4,9 +4,9 @@
 
 SPNDAT is a single-page web application that takes multiple .fit cycling files (from Garmin, Wahoo, or Hammerhead head units), aligns their timestamps so they share a common time axis, and overlays them on an interactive graph with descriptive statistics. The primary use case is comparing power meters: you ride with two devices recording simultaneously, then drop both files into the app to see how closely they agree.
 
-The application runs entirely in the browser. There is no server, no database, no user accounts, no file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero server, zero persistence) shapes every architectural choice. The app is a static set of HTML, CSS, and JS files; it can be served from any HTTP server or opened from a `file://` URL in a pinch (though `file://` is not officially supported).
+The application runs entirely in the browser. There is no server, no database, no user accounts, no file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero server, zero persistence) shapes every architectural choice. The app is a static set of HTML, CSS, and JS files; it can be served from any HTTP server or opened from a `file://` URL in a pinch, though `file://` is not officially supported.)
 
-A user drops one or more .fit or .tcx files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart with zoom, pan, and series toggling. A statistics panel below the chart shows per-file descriptive stats in a figure-grid layout, with pairwise comparisons (Pearson r, mean absolute error, mean percentage error) in a quieter strip beneath; dragging on the graph creates a time-range selection and a Selection / Overall toggle appears at the top of the panel, defaulting to Selection so the figures recompute over the chosen range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
+A user drops one or more .fit or .tcx files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart with zoom, pan, and series toggling. A statistics panel below the chart shows per-file descriptive stats in a figure-grid layout, with pairwise comparisons (Pearson r, mean absolute error, mean percentage error) in a quieter strip beneath. Dragging on the graph creates a time-range selection; a Selection / Overall toggle then appears at the top of the panel, defaulting to Selection so the figures recompute over the chosen range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
 
 ## 2. The N-second architecture
 
@@ -41,7 +41,7 @@ Every component reads from and writes to the same Zustand store. There is no pro
 
 ## 3. The alignment algorithm
 
-The alignment engine (`src/align.ts`) is the most complex piece of the application. Its job: given two time series that represent the same ride but were recorded on different devices with different start times and different pause behaviour, find the per-segment time offsets that make them line up.
+The alignment engine (`src/align.ts`) is the largest algorithmic component of the application. Its job: given two time series that represent the same ride but were recorded on different devices with different start times and different pause behaviour, find the per-segment time offsets that make them line up.
 
 ### 3.1 Why three passes instead of one
 
@@ -63,13 +63,13 @@ The same **bias-to-zero check** from the original algorithm still applies: if th
 
 ### 3.3 Pass 2: Pause detection
 
-Given the initial offset from Pass 1, `detectPauses` walks both aligned traces in lockstep looking for contiguous null-runs longer than 10 seconds in one file where the other file has data. The 10-second threshold (`PAUSE_GAP_THRESHOLD_SECONDS`) was chosen to distinguish real device pauses from brief sensor dropouts (a heart-rate monitor dropping out for 3 seconds is not a pause; it is a sensor glitch that the null-fill in resampling handles).
+Given the initial offset from Pass 1, `findNextInternalPause` walks both aligned traces in lockstep looking for contiguous null-runs longer than 10 seconds in one file where the other file has data. Leading gaps (file B starts later than file A) and trailing gaps (file B ends before file A) are explicitly ignored — only pauses bracketed by mutual overlap count as internal. The 10-second threshold (`PAUSE_GAP_THRESHOLD_SECONDS`) was chosen to distinguish real device pauses from brief sensor dropouts (a heart-rate monitor dropping out for 3 seconds is not a pause; it is a sensor glitch that the null-fill in resampling handles).
 
-Each pause is represented by reference-time start/end timestamps and a gap-ownership flag (`'ref'` or `'other'`), not raw array indices, so downstream code can map to either file's local timeline independently.
+Pause detection runs under the current offset and is called again after each accepted re-anchor, so later pauses are always discovered under the correct offset, not the initial one. Each detected pause uses index-based boundaries (`startIdx`, `endIdxExclusive`) internal to the scanner, decoupling from either file's timeline until segment boundaries are derived.
 
 ### 3.4 Pass 3: Full-range post-pause re-anchoring
 
-For each post-pause segment, the algorithm scores a 180-second window starting at the reference timeline's resume point against the **full** other-file timeline. It searches the entire +-300 second range (the same range available in the manual offset controls) rather than the old +-30-second narrow window. This handles real-world cases where a device power-off and restart shifts the effective alignment by over two minutes -- a 30-second search could never recover those jumps.
+For each post-pause segment, the algorithm scores a 180-second window starting at the reference timeline's resume point against the **full** other-file timeline. It searches the entire +-300 second range (the same range available in the manual offset controls) rather than the old +-30-second narrow window. This handles real-world cases where a device power-off and restart shifts the effective alignment by over two minutes (a 30-second search could never recover those jumps).
 
 A candidate post-pause offset is accepted only when it satisfies three gates:
 - **Overlap**: at least 10 seconds of overlapping non-null data.
@@ -79,7 +79,9 @@ A candidate post-pause offset is accepted only when it satisfies three gates:
 If no candidate clears all three gates, the previous offset is kept and no duplicate segment is emitted (the old segment is extended instead).
 The bias-to-zero gate is not applied in Pass 3, since by this pass we have already accepted that the files align.
 
-### 3.5 The local-time segment contract
+After the first internal null-gap pause has been seen, the scanner also watches for sustained short-window offset-regime changes that occur without a null gap (e.g. a device recording zero power instead of missing data). These recorded-data changes are accepted under the same three gates and with an additional guard: offset decreases are rejected because they usually indicate a false match from repeated workout shapes. The next segment then starts at `refWindowStart - newOffset` rather than the old offset's projection, preventing a late cutover.
+
+### 3.6 The local-time segment contract
 
 Every `OffsetSegment` has its `fromTime` and `toTime` on the **owning file's local timeline**, not the reference timeline. This is formalised in `src/alignmentTime.ts` with these helpers:
 
@@ -91,7 +93,7 @@ Every `OffsetSegment` has its `fromTime` and `toTime` on the **owning file's loc
 
 All graph rendering (`FitGraph`), statistics (`computeFileStats`, `computePairwiseStats`), and store extent computation (`computeDataExtent`) use these shared helpers, eliminating inconsistent duplicate arithmetic.
 
-### 3.5 Aligning more than two files
+### 3.7 Aligning more than two files
 
 `alignAll` pairs every non-reference file against the reference file (the one with the most records, chosen automatically). The reference file itself gets a single segment with offset 0. Each pair is aligned independently via `alignPair`. This means the alignment is a star topology, not a full pairwise mesh. A star topology is simpler, costs O(n) instead of O(n^2), and in practice works well because the reference file typically contains the most data (longest recording, fewest gaps).
 
@@ -145,7 +147,7 @@ Coasting power on a bike is zero watts; it is real data, not a missing sensor re
 
 `src/parser.ts` wraps the `fit-file-parser` library, which handles the binary FIT format. The library requires an `ArrayBuffer`, so the parser first reads the dropped `File` into an `ArrayBuffer` via `file.arrayBuffer()`. It configures the parser with `force: true` (continue on errors, don't abort on malformed records), metric units (metres, m/s, Celsius), and `mode: 'both'` (records available both inside laps and at the root level).
 
-The most finicky part is timestamp normalisation. The library emits `record.timestamp` as a `Date` object (`new Date(epochSeconds * 1000 + GarminTimeOffset)` in its `binary.js`); other producers may hand back ISO strings or numeric strings (FIT epoch seconds or Unix seconds). `parseTimeString` covers all of these by branching on the numeric magnitude after `Number(ts)` coercion (which also handles `Date` -> Unix ms automatically), and by falling back to `Date.parse` for ISO strings. The FIT epoch offset (631065600 seconds between 1989-12-31 and 1970-01-01) is hard-coded; this is a stable constant defined by the FIT specification.
+The most involved part is timestamp normalisation. The library emits `record.timestamp` as a `Date` object (`new Date(epochSeconds * 1000 + GarminTimeOffset)` in its `binary.js`); other producers may hand back ISO strings or numeric strings (FIT epoch seconds or Unix seconds). `parseTimeString` covers all of these by branching on the numeric magnitude after `Number(ts)` coercion (which also handles `Date` -> Unix ms automatically), and by falling back to `Date.parse` for ISO strings. The FIT epoch offset (631065600 seconds between 1989-12-31 and 1970-01-01) is hard-coded; this is a stable constant defined by the FIT specification.
 
 ### 5.2 TCX parsing
 
@@ -188,7 +190,7 @@ The store holds all application state (files, parse results, alignment results, 
 
 Zustand was chosen over React Context. It does not require a provider wrapper. Selectors avoid unnecessary re-renders (Context forces re-render of all consumers when any part of the context changes). It supports reading state imperatively (`get()`) inside async actions, which matters for `addFiles` (parse a file, push it to the list, then run alignment on the new list, all within the same action). And it has zero boilerplate compared to Redux.
 
-The store alone is 269 lines. The actions are pure Zustand `set` calls; there is no middleware.
+The store alone is 270 lines. The actions are pure Zustand `set` calls; there is no middleware.
 
 ### 6.3 Duplicate detection
 
@@ -209,11 +211,15 @@ The integration point between the algorithmic modules and the UI is the `addFile
 3. After all files are parsed and resampled, `recomputeAlignment()` runs `alignAll` against the reference file.
 4. Results are stored on each `FileEntry` in the `files[]` array.
 
-The graph and stats panel react to changes in `files[]` and `selectedMetric` via Zustand selectors. When the user changes a metric, only `selectedMetric` changes; `useMemo` in both components recomputes the derived data.
+The graph and stats panel react to changes in `files[]` and `selectedMetric` via Zustand selectors. When the user changes a metric, only `selectedMetric` changes. `useMemo` in both components recomputes the derived data.
 
 When the user edits an offset in `OffsetControls`, the store mutates the `alignmentResult.segments` array in place (via immutable spread in `nudgeOffset` or `setSegmentOffset`). The graph and stats panel re-render because their selectors depend on `files[]`, which changed. There is no explicit event bus or callback chain; the store is the channel.
 
-The graph selection is a thin two-way binding over the store's `selection` field. Dragging fires uPlot's `setSelect` hook, which converts the pixel range to data coordinates and calls `setSelection`. A guard ref prevents the reverse path (store -> chart re-apply via `u.setSelect`) from re-entering the hook. The selection itself is stored as `{ fromTime, toTime }` in milliseconds on the **reference (aligned) timebase** -- the same units the graph's x-axis displays. Because each file's `ResampledSeries.timestamps` are on its own local timebase, `computeFileStats` translates the aligned range through that file's segment offsets before filtering (the reference file always has zero offsets, so its local and aligned timebases coincide). `computePairwiseStats` walks the reference file's timestamps and so can short-circuit on the range directly. Selections are clamped to the combined data extent in `setSelection` and again in every store action that can shift extents (`removeFile`, `recomputeAlignment`, `nudgeOffset`, `setSegmentOffset`, `nudgeAllOffsets`); a clamped selection that collapses to zero width becomes `null`. This means selections survive metric switches and small offset nudges, but disappear when files are removed in a way that pushes the selection entirely out of bounds.
+The graph selection is a thin two-way binding over the store's `selection` field. Dragging fires uPlot's `setSelect` hook, which converts the pixel range to data coordinates and calls `setSelection`. A guard ref prevents the reverse path (store -> chart re-apply via `u.setSelect`) from re-entering the hook. The selection itself is stored as `{ fromTime, toTime }` in milliseconds on the **reference (aligned) timebase**, which is the same units the graph's x-axis displays.
+
+Because each file's `ResampledSeries.timestamps` are on its own local timebase, `computeFileStats` translates the aligned range through that file's segment offsets before filtering (the reference file always has zero offsets, so its local and aligned timebases coincide). `computePairwiseStats` walks the reference file's timestamps and can short-circuit on the range directly.
+
+Selections are clamped to the combined data extent in `setSelection` and again in every store action that can shift extents (`removeFile`, `recomputeAlignment`, `nudgeOffset`, `setSegmentOffset`, `nudgeAllOffsets`); a clamped selection that collapses to zero width becomes `null`. Selections survive metric switches and small offset nudges, but disappear when files are removed in a way that pushes the selection entirely out of bounds.
 
 ## 8. Supporting scripts and tests
 
@@ -222,10 +228,10 @@ The graph selection is a thin two-way binding over the store's `selection` field
 |`src/parser.test.ts`|`parseFitFile` with mocked `fit-file-parser`: error, zero records, full records, missing power, optional fields, numeric timestamps, Date-object timestamps (the format the library actually emits).|7|
 |`src/tcx.test.ts`|`parseTcxFile`: full trackpoint extraction, metadata (sport, device, startTime), missing-power-as-null, no-power warning, no-records warning, malformed XML, missing Activity, multi-Lap aggregation, fallback startTime.|9|
 |`src/resample.test.ts`|`resample()` with synthetic `FitSession`: empty, evenly spaced, rounding, gaps, single record, irregular spacing, same-tick overwrite, multi-metric nulls.|8|
-|`src/align.test.ts`|`alignPair` and `alignAll`: synthetic pause regression (+133s jump), known-offset detection, zero-offset files, single pause, no-pause, no-overlap failure, random-noise failure, empty series, multi-file align, mixed success/failure, unrelated-workout bias-to-zero, scale-invariance, pause in non-reference file, two sequential pauses, >2-minute offset jump recovery, and sensor-dropout rejection.|19|
-|`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps), and multi-segment pairwise lookups with non-zero offsets.|20|
-|`src/alignmentTime.test.ts`|`localToAligned`, `alignedToLocal`, `segmentAlignedWindow`, `isInPause`, `offsetForLocalTs`, `alignedRangeToLocalWindows`: fallback behaviour, multi-segment, negative offsets, large offset gaps (>60 s).|16|
-|`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching, and selection lifecycle (clamping, out-of-bounds clearing, clearAll/removeFile cleanup).|17|
+|`src/align.test.ts`|`alignPair` and `alignAll`: synthetic pause regression (+133s jump), known-offset detection, zero-offset files, single pause, no-pause, no-overlap failure, random-noise failure, empty series, multi-file align, mixed success/failure, unrelated-workout bias-to-zero, scale-invariance, single-pause coalescing, two-sequential-pause coalescing, >2-minute offset jump recovery, sensor-dropout rejection, leading/trailing extent-gap filtering, two true offset jumps, ref-pause-then-other-pause, same-offset no-split, recorded-data regime changes, and segment-boundary cutover assertions.|25|
+|`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps), and multi-segment pairwise lookups with non-zero offsets.|21|
+|`src/alignmentTime.test.ts`|`localToAligned`, `alignedToLocal`, `segmentAlignedWindow`, `isInPause`, `offsetForLocalTs`, `alignedRangeToLocalWindows`: fallback behaviour, multi-segment, negative offsets, large offset gaps (>60 s), precision at segment boundaries.|25|
+|`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching, and selection lifecycle (clamping, out-of-bounds clearing, clearAll/removeFile cleanup).|18|
 |`src/components/StatsPanel.test.tsx`|`StatsPanel` renders overall stats with no toggle when there is no selection; uses the selected metric's unit; defaults to Selection scope and hides Overall numbers when a selection is active; switches scope on toggle click; the "Clear selection" button dismisses the selection; pairwise comparisons render only in the demoted strip and only with 2+ files.|8|
 |`src/components/FitGraph.test.tsx`|Smoke test that the component mounts without crashing.|1|
 
@@ -265,7 +271,7 @@ Read the files in this order:
 
 7. `src/store.ts` -- the Zustand store. Read `addFiles` to see how parse, resample, and align are chained. Read the offset mutation actions to see how manual edits propagate.
 
-8. `src/components/FitGraph.tsx` -- the hardest UI component. `buildChartData` constructs uPlot's `AlignedData` from raw records with per-segment offset adjustment. The effects manage uPlot lifecycle, data updates, and selection synchronisation.
+8. `src/components/FitGraph.tsx` -- the most involved UI component. `buildChartData` constructs uPlot's `AlignedData` from raw records with per-segment offset adjustment. The effects manage uPlot lifecycle, data updates, and selection synchronisation.
 
 9. `src/App.tsx` -- the shell. Shows the vertical composition of all components and the alignment-failure banner condition.
 
