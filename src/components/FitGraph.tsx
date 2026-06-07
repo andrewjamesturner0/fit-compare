@@ -128,6 +128,11 @@ export function FitGraph() {
     () => buildChartData(files, selectedMetric),
     [files, selectedMetric],
   )
+  const dataRef = useRef(data)
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
 
   const opts = useMemo(() => {
     const series: uPlot.Series[] = [
@@ -208,7 +213,8 @@ export function FitGraph() {
       uplotRef.current = null
     }
 
-    if (data[0].length === 0) return
+    const initialData = dataRef.current
+    if (initialData[0].length === 0) return
 
     const containerWidth = chartRef.current.clientWidth
     const containerHeight = chartRef.current.clientHeight
@@ -218,8 +224,7 @@ export function FitGraph() {
       height: Math.max(containerHeight, MIN_CHART_HEIGHT),
     }
 
-    uplotRef.current = new uPlot(plotOpts, data, chartRef.current)
-    ;(chartRef.current as any).__uplot = uplotRef.current
+    uplotRef.current = new uPlot(plotOpts, initialData, chartRef.current)
 
     // Observe resize
     const observer = new ResizeObserver(() => {

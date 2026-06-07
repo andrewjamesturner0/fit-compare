@@ -24,8 +24,7 @@ dist-ssr
 *.sw?
 
 # Misc
-todo.md
-
+.agent/
 
 .codex
 

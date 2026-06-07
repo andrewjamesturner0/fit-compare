@@ -13,6 +13,15 @@ export const METRIC_LABELS: Record<MetricKey, string> = {
   temperature: 'Temperature (°C)',
 }
 
+export const METRIC_UNITS: Record<MetricKey, string> = {
+  power: 'W',
+  cadence: 'rpm',
+  heartRate: 'bpm',
+  speed: 'm/s',
+  elevation: 'm',
+  temperature: '°C',
+}
+
 export const ALIGNMENT_METRIC_FALLBACK: MetricKey[] = ['power', 'heartRate', 'speed']
 
 /** A single data record from a FIT file. All values are nullable — fields may be missing. */

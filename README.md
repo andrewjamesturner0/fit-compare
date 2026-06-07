@@ -1,4 +1,6 @@
-# FIT Compare
+# SPNDAT
+
+**SP**NDAT is **N**ot the **D**cr **A**nalyser **T**ool.
 
 A client-side single-page webapp that parses multiple .fit and .tcx cycling files, auto-aligns their timestamps, overlays them on an interactive graph, and computes descriptive statistics to assess how closely the recordings match.
 
@@ -11,8 +13,8 @@ Primary use case: comparing power meters on the same ride. Mixing formats is sup
 3. Files are automatically parsed and aligned
 4. Use the metric selector to switch between power, cadence, heart rate, speed, elevation, and temperature
 5. Zoom by scrolling; pan by click-dragging
-6. Drag horizontally on the graph to select a time range. The stats panel adds a "Selection" block showing stats restricted to that range, alongside the full-file stats. Click "Clear selection" to dismiss
-7. The stats panel below the graph shows descriptive statistics and pairwise comparisons
+6. Drag horizontally on the graph to select a time range. A Selection / Overall toggle appears at the top of the stats panel; the panel defaults to Selection so the per-file figures show stats restricted to that range. Click Overall to switch back, or "Clear selection" to dismiss the range
+7. The stats panel below the graph shows descriptive statistics for each file in a figure-grid layout, with pairwise comparisons in a quieter strip beneath
 8. Expand "Adjust Offsets" to manually correct alignment if auto-alignment gets it wrong
 
 ## Build and run
@@ -20,6 +22,8 @@ Primary use case: comparing power meters on the same ride. Mixing formats is sup
 ```bash
 npm install
 npm run dev      # development server
+npm test         # test suite
+npm run lint     # lint checks
 npm run build    # production build
 npm run preview  # preview production build
 ```
@@ -48,7 +52,7 @@ If correlation confidence is too low, the file falls back to a single zero-offse
 - **Pairwise:** Pearson r, MAE, MPE (first uploaded file is used as reference for MPE; values near zero are excluded to avoid division blow-up)
 - Pause regions and nulls are excluded pairwise from all comparisons
 - Zeros are kept (coasting power is real data)
-- **Selection scope:** when a time range is selected on the graph, the stats panel adds a second block recomputed over only that range. Selections are stored on the reference (aligned) timebase; for non-reference files the range is translated through their alignment offsets before filtering, so the right slice of each file is included regardless of per-file offset. Selections are clamped to the visible data extent and survive metric switches and offset nudges; they are cleared when all files are removed or when nudges push them out of bounds
+- **Selection scope:** when a time range is selected on the graph, the panel defaults to Selection and recomputes the same per-file figures and pairwise strip over that range. The Selection / Overall toggle switches between the two scopes. Selections are stored on the reference (aligned) timebase; for non-reference files the range is translated through their alignment offsets before filtering, so the correct slice of each file is included regardless of its offset. Selections are clamped to the visible data extent and survive metric switches and offset nudges; they are cleared when all files are removed or when nudges push them out of bounds
 
 ### Graph vs stats
 
