@@ -19,7 +19,7 @@ function App() {
       <header className="flex items-center justify-between px-4 py-2.5 bg-white border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className="inline-block w-2 h-4 rounded-sm" style={{ backgroundColor: '#0072B2' }} />
-          <h1 className="text-[15px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>FIT Compare</h1>
+          <h1 className="text-[15px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>SPNDAT</h1>
         </div>
         {files.length > 0 && (
           <button
