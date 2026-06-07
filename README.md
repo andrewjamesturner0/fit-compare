@@ -2,9 +2,9 @@
 
 **SP**NDAT is **N**ot the **D**cr **A**nalyser **T**ool.
 
-A client-side single-page webapp that parses multiple .fit and .tcx cycling files, auto-aligns their timestamps, overlays them on an interactive graph, and computes descriptive statistics to assess how closely the recordings match.
+A client-side single-page webapp that parses multiple .fit and .tcx cycling files, auto-aligns their timestamps, and overlays them on an interactive graph. Descriptive statistics show how closely the recordings match.
 
-Primary use case: comparing power meters on the same ride. Mixing formats is supported - e.g. comparing a head unit's .fit recording against the matching TrainerRoad .tcx export.
+Primary use case: comparing power meters on the same ride. Mixing formats is supported, e.g. comparing a head unit's .fit recording against the matching TrainerRoad .tcx export.
 
 ## Usage
 
@@ -34,17 +34,17 @@ npm run preview  # preview production build
 
 `File -> parse.ts (dispatch by extension to parser.ts for .fit or tcx.ts for .tcx) -> FitSession -> resample.ts -> 1 Hz ResampledSeries -> align.ts -> OffsetSegment[] (local-time boundaries via alignmentTime.ts) -> graph + stats`
 
-Both parsers produce the same `FitSession` shape, so every downstream stage is format-agnostic. .tcx parsing reads <Trackpoint> elements via DOMParser and pulls power and speed from the Garmin ActivityExtension v2 namespace (typically prefixed `ns3:`).
+Both parsers produce the same `FitSession` shape, so every downstream stage is format-agnostic. .tcx parsing reads <Trackpoint> elements via DOMParser and pulls power and speed from the Garmin ActivityExtension v2 namespace, typically prefixed `ns3:`.
 
 ### Alignment
 
 The three-pass auto-alignment algorithm:
 
-1. **Consecutive-window initial anchoring** -- slides a 180-second scoring window across the reference timeline at a 60-second stride, finds the best offset (+-1 minute) per window, and accepts an offset only when at least two consecutive windows agree on it with acceptable quality. This finds the pre-pause alignment regime even when a later pause makes the whole-trace correlation fail.
-2. **Pause detection** -- walks aligned traces and detects contiguous gaps > 10 seconds where one file has data but the other doesn't. Each pause is recorded with reference-timeline timestamps and gap ownership.
-3. **Full-range post-pause re-anchoring** -- for each post-pause segment, searches the entire +-5 minute manual-offset range against a bounded 180-second post-resume window. A new offset is accepted only when it clears overlap, quality, and improvement gates. This recovers large effective-offset jumps (2+ minutes) that the previous +-30-second search could not.
+1. **Consecutive-window initial anchoring.** Slides a 180-second scoring window across the reference timeline at a 60-second stride, finds the best offset (+-1 minute) per window, and accepts an offset only when at least two consecutive windows agree on it with acceptable quality. This finds the pre-pause alignment regime even when a later pause makes the whole-trace correlation fail.
+2. **Pause detection.** Walks aligned traces and detects contiguous gaps > 10 seconds where one file has data but the other does not. Each pause is recorded with reference-timeline timestamps and gap ownership.
+3. **Full-range post-pause re-anchoring.** For each post-pause segment, searches the entire +-5 minute manual-offset range against a bounded 180-second post-resume window. A new offset is accepted only when it clears overlap, quality, and improvement gates. This recovers large effective-offset jumps (2+ minutes) that the previous +-30-second search could not.
 
-Offset segments use the file's local timeline for their boundaries (not the reference timeline). Shared helpers in `src/alignmentTime.ts` ensure consistent mapping across the graph, stats panel, and store.
+Offset segments use the file's local timeline for their boundaries rather than the reference timeline. Shared helpers in `src/alignmentTime.ts` ensure consistent mapping across the graph, stats panel, and store.
 
 If correlation confidence is too low, the file falls back to a single zero-offset segment (raw clock-time alignment) and a warning is shown. "Adjust Offsets" still lets the user nudge the offset manually.
 
