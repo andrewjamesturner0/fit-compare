@@ -184,6 +184,11 @@ export function FitGraph() {
               return
             }
             setSelection({ fromTime, toTime })
+            // Commit the scale before React reapplies the stored brush, so
+            // valToPos uses the new viewport rather than the previous one.
+            u.batch(() => {
+              u.setScale('x', { min: fromTime, max: toTime })
+            })
           },
         ],
       },
