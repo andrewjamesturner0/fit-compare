@@ -4,9 +4,9 @@
 
 SPNDAT is a single-page web application that takes multiple .fit cycling files (from Garmin, Wahoo, or Hammerhead head units), aligns their timestamps so they share a common time axis, and overlays them on an interactive graph with descriptive statistics. The primary use case is comparing power meters: you ride with two devices recording simultaneously, then drop both files into the app to see how closely they agree.
 
-The application runs entirely in the browser. There is no server, no database, no user accounts, no file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero server, zero persistence) shapes every architectural choice. The app is a static set of HTML, CSS, and JS files; it can be served from any HTTP server or opened from a `file://` URL in a pinch, though `file://` is not officially supported.)
+The application runs entirely in the browser. There is no server, no database, no user accounts, no file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero server, zero persistence) shapes every architectural choice. The app is a static set of HTML, CSS, and JS files; it can be served from any HTTP server or opened from a `file://` URL in a pinch (though `file://` is not officially supported).
 
-A user drops one or more .fit or .tcx files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart with zoom, pan, and series toggling. A statistics panel below the chart shows per-file descriptive stats in a figure-grid layout, with pairwise comparisons (Pearson r, mean absolute error, mean percentage error) in a quieter strip beneath. Dragging on the graph creates a time-range selection; a Selection / Overall toggle then appears at the top of the panel, defaulting to Selection so the figures recompute over the chosen range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
+A user drops one or more .fit or .tcx files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart. A statistics panel below the chart shows per-file descriptive stats in a figure-grid layout, with pairwise comparisons (Pearson r, mean absolute error, mean percentage error) in a quieter strip beneath. Dragging on the graph creates a time-range selection on the aligned (reference) timebase. The graph immediately zooms to that exact range. A Selection / Overall toggle then appears at the top of the panel, defaulting to Selection so the figures recompute over the chosen range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
 
 ## 2. The N-second architecture
 
@@ -81,7 +81,7 @@ The bias-to-zero gate is not applied in Pass 3, since by this pass we have alrea
 
 After the first internal null-gap pause has been seen, the scanner also watches for sustained short-window offset-regime changes that occur without a null gap (e.g. a device recording zero power instead of missing data). These recorded-data changes are accepted under the same three gates and with an additional guard: offset decreases are rejected because they usually indicate a false match from repeated workout shapes. The next segment then starts at `refWindowStart - newOffset` rather than the old offset's projection, preventing a late cutover.
 
-### 3.6 The local-time segment contract
+### 3.5 The local-time segment contract
 
 Every `OffsetSegment` has its `fromTime` and `toTime` on the **owning file's local timeline**, not the reference timeline. This is formalised in `src/alignmentTime.ts` with these helpers:
 
@@ -93,7 +93,7 @@ Every `OffsetSegment` has its `fromTime` and `toTime` on the **owning file's loc
 
 All graph rendering (`FitGraph`), statistics (`computeFileStats`, `computePairwiseStats`), and store extent computation (`computeDataExtent`) use these shared helpers, eliminating inconsistent duplicate arithmetic.
 
-### 3.7 Aligning more than two files
+### 3.6 Aligning more than two files
 
 `alignAll` pairs every non-reference file against the reference file (the one with the most records, chosen automatically). The reference file itself gets a single segment with offset 0. Each pair is aligned independently via `alignPair`. This means the alignment is a star topology, not a full pairwise mesh. A star topology is simpler, costs O(n) instead of O(n^2), and in practice works well because the reference file typically contains the most data (longest recording, fewest gaps).
 
@@ -174,13 +174,13 @@ The UI is a single-page React app with no routing. Six components compose the pa
 |`App.tsx`|Top-level layout: header, file-drop zone, alignment-failure banner, metric selector, graph, stats, offset controls.|
 |`FileDropZone.tsx`|Drag-and-drop zone + hidden file input. Filters drops to .fit and .tcx via `isSupportedFile`. Displays file cards with colour swatch, device name, record count, parse status, warnings, and remove button.|
 |`MetricSelector.tsx`|Row of pill buttons for each of six metrics. Greys out metrics absent from all loaded files.|
-|`FitGraph.tsx`|uPlot canvas. Builds shared timeline from union of all files' offset-adjusted timestamps. Handles resize via `ResizeObserver`. Drag = time-range selection (zoom-on-drag is disabled); the brush is two-way bound to the store's `selection` state.|
+|`FitGraph.tsx`|uPlot canvas. Builds a shared timeline from the union of all files' offset-adjusted timestamps. Handles resize via `ResizeObserver`. A horizontal drag creates a time-range selection and immediately zooms the x-axis to the selected range; the brush is two-way bound to the store's `selection` state.|
 |`StatsPanel.tsx`|Per-file descriptive stats rendered as a figure-grid (large Mean on the left, supporting Max/Min/SD/N on the right per file). Pairwise comparisons against the first file appear in a demoted strip below. When `selection` is set, a Selection / Overall toggle appears in the panel header (defaulting to Selection); the same figure-grid recomputes over the selected range, alongside a "Clear selection" button.|
 |`OffsetControls.tsx`|Collapsible panel with per-file, per-segment offset editors. Link-all-segments checkbox. Global nudge-all-files controls.|
 
 ### 6.1 Why uPlot
 
-The graph renders 3,600-14,400 data points per file (1-4 Hz over an hour). At three files, that is up to 43,200 points. Most React charting libraries (Recharts, Chart.js, Nivo) struggle beyond a few thousand points with smooth zoom and pan.
+The graph renders 3,600-14,400 data points per file (1-4 Hz over an hour). At three files, that is up to 43,200 points. Most React charting libraries (Recharts, Chart.js, Nivo) struggle to handle more than a few thousand points smoothly.
 
 uPlot is purpose-built for dense time-series. It uses a single Canvas element, bypasses the DOM for data rendering, and handles 100k+ points without frame drops. The trade-off is an imperative API; there are no React-style declarative props for data updates. The `FitGraph` component splits uPlot lifecycle into two effects: one keyed on `opts` (which changes only when files are added or removed) destroys and recreates the chart, while a second effect keyed on `data` calls uPlot's `setData()` to update traces in-place. This preserves zoom state and avoids chart flash when the user nudges offsets, a frequent operation that only changes data, not the number of series.
 
@@ -215,7 +215,7 @@ The graph and stats panel react to changes in `files[]` and `selectedMetric` via
 
 When the user edits an offset in `OffsetControls`, the store mutates the `alignmentResult.segments` array in place (via immutable spread in `nudgeOffset` or `setSegmentOffset`). The graph and stats panel re-render because their selectors depend on `files[]`, which changed. There is no explicit event bus or callback chain; the store is the channel.
 
-The graph selection is a thin two-way binding over the store's `selection` field. Dragging fires uPlot's `setSelect` hook, which converts the pixel range to data coordinates and calls `setSelection`. A guard ref prevents the reverse path (store -> chart re-apply via `u.setSelect`) from re-entering the hook. The selection itself is stored as `{ fromTime, toTime }` in milliseconds on the **reference (aligned) timebase**, which is the same units the graph's x-axis displays.
+The graph selection is a thin two-way binding over the store's `selection` field. Dragging fires uPlot's `setSelect` hook, which converts the pixel range to data coordinates, calls `setSelection`, and immediately sets the x-axis scale to those exact bounds. A guard ref prevents the reverse path (store -> chart re-apply via `u.setSelect`) from re-entering the hook. The selection itself is stored as `{ fromTime, toTime }` in milliseconds on the **reference (aligned) timebase**, which is the same unit the graph's x-axis displays.
 
 Because each file's `ResampledSeries.timestamps` are on its own local timebase, `computeFileStats` translates the aligned range through that file's segment offsets before filtering (the reference file always has zero offsets, so its local and aligned timebases coincide). `computePairwiseStats` walks the reference file's timestamps and can short-circuit on the range directly.
 
@@ -233,7 +233,7 @@ Selections are clamped to the combined data extent in `setSelection` and again i
 |`src/alignmentTime.test.ts`|`localToAligned`, `alignedToLocal`, `segmentAlignedWindow`, `isInPause`, `offsetForLocalTs`, `alignedRangeToLocalWindows`: fallback behaviour, multi-segment, negative offsets, large offset gaps (>60 s), precision at segment boundaries.|25|
 |`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching, and selection lifecycle (clamping, out-of-bounds clearing, clearAll/removeFile cleanup).|18|
 |`src/components/StatsPanel.test.tsx`|`StatsPanel` renders overall stats with no toggle when there is no selection; uses the selected metric's unit; defaults to Selection scope and hides Overall numbers when a selection is active; switches scope on toggle click; the "Clear selection" button dismisses the selection; pairwise comparisons render only in the demoted strip and only with 2+ files.|8|
-|`src/components/FitGraph.test.tsx`|Smoke test that the component mounts without crashing.|1|
+|`src/components/FitGraph.test.tsx`|Component mount smoke test, exact selection zoom, and no-zoom checks for cleared or invalid brushes.|4|
 
 All tests use Vitest with jsdom. The test setup file (`src/test-setup.ts`) provides a mock `window.matchMedia` (needed by uPlot at import time) and the `@testing-library/jest-dom` matchers. The parser and resample mocks in store tests prevent the store from calling real I/O.
 
@@ -245,7 +245,7 @@ The `test-data/` directory exists but has no committed fixtures yet. That is a k
 |-|-|
 |TypeScript|The data model has 20+ nullable fields across 6 metric types. Without types, field name typos and null-handling mistakes would be silent bugs. The alignment algorithm's cross-correlation operates on numeric arrays; `number | null` types catch missing null checks at compile time.|
 |Zustand|The store needs to be readable imperatively inside async actions (parse-then-align pipeline) and subscribable by React components. Zustand supports both with zero provider boilerplate. Context would re-render the entire tree on every file parse. Redux would add ~40 lines of boilerplate for a single-state-tree app.|
-|uPlot|Canvas-based rendering for 40k+ data points with zoom/pan. DOM-based charting libraries (Recharts, Chart.js) allocate a DOM node per data point and choke above ~5k points. uPlot's imperative API is a minor cost paid once in `FitGraph.tsx`.|
+|uPlot|Canvas-based rendering for 40k+ data points with range selection and selection-driven zoom. DOM-based charting libraries (Recharts, Chart.js) allocate a DOM node per data point and choke above ~5k points. uPlot's imperative API is a minor cost paid once in `FitGraph.tsx`.|
 |fit-file-parser|The only maintained npm package for parsing the Garmin FIT binary format. Lightly maintained (last release several years ago) but the FIT spec is stable. Uses a caret version range (^2.3.3) with a known-working minor version.|
 |Tailwind CSS v4|Utility-first CSS for a project with ~10 components. No design system, no Figma, no designer. Tailwind lets components carry their own styling without naming conventions or cascade conflicts. Version 4 uses the Vite plugin rather than PostCSS, eliminating a build step.|
 |Vite|Zero-config dev server with HMR. The `@tailwindcss/vite` and `@vitejs/plugin-react` plugins cover the entire build pipeline. webpack would require ~50 lines of config for the same result.|

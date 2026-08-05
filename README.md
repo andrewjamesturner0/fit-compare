@@ -12,10 +12,9 @@ Primary use case: comparing power meters on the same ride. Mixing formats is sup
 2. Drop one or more `.fit` or `.tcx` files onto the drop zone (or click to browse)
 3. Files are automatically parsed and aligned
 4. Use the metric selector to switch between power, cadence, heart rate, speed, elevation, and temperature
-5. Zoom by scrolling; pan by click-dragging
-6. Drag horizontally on the graph to select a time range. A Selection / Overall toggle appears at the top of the stats panel; the panel defaults to Selection so the per-file figures show stats restricted to that range. Click Overall to switch back, or "Clear selection" to dismiss the range
-7. The stats panel below the graph shows descriptive statistics for each file in a figure-grid layout, with pairwise comparisons in a quieter strip beneath
-8. Expand "Adjust Offsets" to manually correct alignment if auto-alignment gets it wrong
+5. Drag horizontally on the graph to select a range on the aligned (reference) timebase. The graph immediately zooms to that exact range. A Selection / Overall toggle appears at the top of the stats panel; the panel defaults to Selection so the per-file figures show stats restricted to the range. Click Overall to switch back, or "Clear selection" to dismiss the range
+6. The stats panel below the graph shows descriptive statistics for each file in a figure-grid layout, with pairwise comparisons in a quieter strip beneath
+7. Expand "Adjust Offsets" to manually correct alignment if auto-alignment gets it wrong
 
 ## Build and run
 
