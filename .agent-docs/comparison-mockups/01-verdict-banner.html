@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option 1: Verdict Banner + Compact Grid</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg-app: #f6f7f9;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f1f3f5;
+    --border-subtle: #eef0f2;
+    --border-default: #d4d7dc;
+    --text-primary: #14161a;
+    --text-secondary: #5b6470;
+    --text-muted: #8a929c;
+    --accent: #0b6bcb;
+    --accent-soft: #e7f0fb;
+    --stats-secondary-bg: #f1f3f5;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.05);
+
+    /* Semantic verdict colors */
+    --verdict-pass-bg: #eaf7ea;
+    --verdict-pass-border: #a3d9a5;
+    --verdict-pass-text: #1a5c1a;
+    --verdict-fail-bg: #fdf0ed;
+    --verdict-fail-border: #f0b8a8;
+    --verdict-fail-text: #7a2a1a;
+    --verdict-inconc-bg: #fff8e6;
+    --verdict-inconc-border: #f5d77a;
+    --verdict-inconc-text: #8a5a00;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    padding: 32px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .mockup-container {
+    width: 100%;
+    max-width: 740px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 20px 24px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* -- Section label -- */
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 12px;
+  }
+
+  /* -- Verdict banner -- */
+  .verdict-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 20px;
+  }
+
+  .verdict-banner.pass {
+    background: var(--verdict-pass-bg);
+    border: 1px solid var(--verdict-pass-border);
+    color: var(--verdict-pass-text);
+  }
+  .verdict-banner.fail {
+    background: var(--verdict-fail-bg);
+    border: 1px solid var(--verdict-fail-border);
+    color: var(--verdict-fail-text);
+  }
+  .verdict-banner.inconclusive {
+    background: var(--verdict-inconc-bg);
+    border: 1px solid var(--verdict-inconc-border);
+    color: var(--verdict-inconc-text);
+  }
+
+  .verdict-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .pass .verdict-dot { background: #2d8a2d; }
+  .fail .verdict-dot { background: #c0392b; }
+  .inconclusive .verdict-dot { background: #d4a017; }
+
+  .verdict-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: auto;
+  }
+
+  /* -- Stat grid -- */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .stat-card {
+    background: var(--bg-subtle);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+  }
+
+  .stat-card-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+
+  .stat-card-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .stat-card-secondary {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .stat-card.wide {
+    grid-column: 1 / -1;
+  }
+
+  /* -- File pair header -- */
+  .pair-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .pair-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .pair-dot.ref { background: #000000; }
+  .pair-dot.other { background: #E69F00; }
+  .pair-vs {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .pair-filename {
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-container">
+  <!-- File pair label -->
+  <div class="pair-header">
+    <span class="pair-dot ref"></span>
+    <span class="pair-filename">Assioma Left</span>
+    <span class="pair-vs">vs</span>
+    <span class="pair-dot other"></span>
+    <span class="pair-filename">Assioma Right</span>
+  </div>
+
+  <!-- Verdict banner: PASS variant -->
+  <div class="verdict-banner pass">
+    <span class="verdict-dot"></span>
+    Equivalent at &plusmn;3% margin
+    <span class="verdict-meta">TOST: 90% CI [-1.8&thinsp;W, +0.9&thinsp;W] within &plusmn;7.0&thinsp;W</span>
+  </div>
+
+  <!-- Primary stats grid -->
+  <div class="section-label">Agreement statistics</div>
+  <div class="stat-grid">
+
+    <div class="stat-card">
+      <div class="stat-card-label">Bias (mean diff)</div>
+      <div class="stat-card-value">-0.5 W</div>
+      <div class="stat-card-secondary">-0.2% of mean (233 W)</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-label">Limits of agreement</div>
+      <div class="stat-card-value">-10.8 to +9.8 W</div>
+      <div class="stat-card-secondary">-4.6% to +4.2%</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-label">Effect size (dz)</div>
+      <div class="stat-card-value">0.04</div>
+      <div class="stat-card-secondary">Negligible</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-label">CCC</div>
+      <div class="stat-card-value">0.996</div>
+      <div class="stat-card-secondary">Almost perfect</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-label">RMSE</div>
+      <div class="stat-card-value">5.3 W</div>
+      <div class="stat-card-secondary">2.3% of mean</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-label">CV of differences</div>
+      <div class="stat-card-value">2.2%</div>
+      <div class="stat-card-secondary">SD diff = 5.2 W</div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

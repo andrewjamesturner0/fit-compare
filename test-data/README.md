@@ -2,7 +2,7 @@
 
 ## Fixtures (`fixtures/`)
 
-Synthetic or hand-crafted .fit files checked into version control. These are used by automated tests.
+Reserved for synthetic or hand-crafted .fit files checked into version control. The current automated suite uses inline synthetic series and parser mocks, so this directory is empty.
 
 To generate synthetic .fit files:
 - Use the `fit-file-parser` library's example file or create minimal valid FIT files
@@ -10,7 +10,7 @@ To generate synthetic .fit files:
 
 ## Samples (`samples/`)
 
-Real anonymised paired recordings used for integration and manual testing.
+Reserved for real anonymised paired recordings used for manual testing.
 These should be gitignored if they are large or contain personal data.
 
 To obtain samples:
@@ -19,4 +19,4 @@ To obtain samples:
 3. Anonymise by stripping out GPS coordinates if desired
 4. Place in this directory
 
-If samples are not checked in, tests that reference them will be skipped.
+The automated suite does not depend on this directory.

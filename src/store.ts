@@ -85,7 +85,7 @@ export interface AppState {
   nudgeOffset: (id: string, deltaSeconds: number) => void
   setSegmentOffset: (id: string, segmentIndex: number, offsetSeconds: number) => void
   nudgeAllOffsets: (deltaSeconds: number) => void
-  setSelection: (selection: Selection | null) => void
+  setSelection: (selection: Selection | null) => Selection | null
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -265,6 +265,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setSelection: (selection: Selection | null) => {
-    set((state) => ({ selection: clampSelection(selection, state.files) }))
+    const nextSelection = clampSelection(selection, get().files)
+    set({ selection: nextSelection })
+    return nextSelection
   },
 }))

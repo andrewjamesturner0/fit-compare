@@ -35,3 +35,8 @@ When switching to a new offset, the next segment starts at `refTime - newOffset`
 ## No real files in CI
 
 `examples/` is gitignored. Tests use synthetic fixtures that model the observed regression shapes.
+
+## Decisions & deliberate behaviours
+
+- **Treat the power agreement contract as one unit.** The comparison-minus-reference sign, sample SD, strict TOST boundaries, and fixed `max(3%, 5 W)` margin are coupled; changing one can reverse the verdict or make its copy false. Guarded by `src/stats.test.ts`. Rationale: `docs/walkthrough.md` and `.agent-docs/comparison-statistics.md`.
+- **Keep the agreement verdict power-only and descriptive.** The 5 W floor has no useful meaning for other metrics, while autocorrelation in adjacent 1 Hz readings makes the confidence interval too optimistic for a formal claim. Guarded by `src/components/StatsPanel.test.tsx` and `src/components/ComparisonView.test.tsx`. Rationale: `docs/walkthrough.md` and `.agent-docs/comparison-statistics.md`.

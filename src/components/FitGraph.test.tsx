@@ -153,6 +153,42 @@ describe('FitGraph', () => {
     )
   })
 
+  it('zooms to the range accepted by the store after clamping', () => {
+    useStore.setState({ files: [makeFileEntry()], referenceFileId: '0' })
+    render(<FitGraph />)
+    const instance = uPlotMock.MockUPlot.latestInstance!
+    instance.select = { left: 20, top: 0, width: 30, height: 200 }
+    instance.posToVal.mockImplementation((position) => (
+      position === 20 ? -500 : 10_500
+    ))
+
+    act(() => getSetSelectHook()(instance))
+
+    expect(useStore.getState().selection).toEqual({
+      fromTime: 0,
+      toTime: 10_000,
+    })
+    expect(instance.setScale).toHaveBeenCalledWith('x', {
+      min: 0,
+      max: 10_000,
+    })
+  })
+
+  it('does not zoom when the store rejects an out-of-bounds graph range', () => {
+    useStore.setState({ files: [makeFileEntry()], referenceFileId: '0' })
+    render(<FitGraph />)
+    const instance = uPlotMock.MockUPlot.latestInstance!
+    instance.select = { left: 20, top: 0, width: 30, height: 200 }
+    instance.posToVal.mockImplementation((position) => (
+      position === 20 ? 11_000 : 12_000
+    ))
+
+    act(() => getSetSelectHook()(instance))
+
+    expect(useStore.getState().selection).toBeNull()
+    expect(instance.setScale).not.toHaveBeenCalled()
+  })
+
   it.each([
     { name: 'a cleared brush', width: 0, toTime: 2_000 },
     { name: 'an invalid range', width: 10, toTime: 1_000 },

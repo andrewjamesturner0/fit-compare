@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPNDAT: Stats comparison mockups</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg-app: #f6f7f9;
+    --bg-surface: #ffffff;
+    --border-subtle: #eef0f2;
+    --text-primary: #14161a;
+    --text-secondary: #5b6470;
+    --text-muted: #8a929c;
+    --accent: #0b6bcb;
+    --radius-md: 6px;
+    --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.05);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    padding: 40px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .index-container {
+    width: 100%;
+    max-width: 680px;
+  }
+
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+
+  .option-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .option-card {
+    display: block;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    text-decoration: none;
+    color: inherit;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .option-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 1px 4px rgba(11, 107, 203, 0.12);
+  }
+
+  .option-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  .option-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .option-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+
+<div class="index-container">
+  <h1>SPNDAT stats comparison &mdash; UI mockups</h1>
+  <p class="subtitle">
+    Five options for presenting statistical agreement data (Bland-Altman, TOST,
+    effect size, CCC, RMSE) in the stats panel. All use the project&rsquo;s
+    existing CSS variables, fonts, and colour palette. The data shown is the
+    same in all five: Assioma Left vs. Assioma Right, which agree well.
+  </p>
+
+  <div class="option-list">
+    <a href="01-verdict-banner.html" class="option-card">
+      <div class="option-num">Option 1</div>
+      <div class="option-title">Verdict Banner + Compact Grid</div>
+      <div class="option-desc">
+        A coloured verdict banner at the top (green/amber/red) with the TOST
+        outcome, followed by a 2-column grid of stat cards. Most direct and
+        lab-report-like. Good for: getting to the answer fast.
+      </div>
+    </a>
+
+    <a href="02-side-by-side-cards.html" class="option-card">
+      <div class="option-num">Option 2</div>
+      <div class="option-title">Side-by-side Comparison Cards</div>
+      <div class="option-desc">
+        Left and right file cards with a central delta column showing the bias,
+        a tolerance-bar visual, and the verdict chip. Supporting stats in a row
+        below. Good for: visual balance, showing both files equally.
+      </div>
+    </a>
+
+    <a href="03-accordion-expand.html" class="option-card">
+      <div class="option-num">Option 3</div>
+      <div class="option-title">Accordion Expand Details</div>
+      <div class="option-desc">
+        The existing compact pairwise strip, but each row expands inline on click
+        to reveal the full statistical breakdown. Minimalist, preserves current
+        density, details on demand. Good for: many file pairs, power users.
+      </div>
+    </a>
+
+    <a href="04-dense-table.html" class="option-card">
+      <div class="option-num">Option 4</div>
+      <div class="option-title">Dense Table Grid</div>
+      <div class="option-desc">
+        All pairwise comparisons in a spreadsheet-style table. Columns for every
+        statistic, verdict badges in the last column. Most compact. Good for:
+        comparing 3+ files at a glance, data-minded users.
+      </div>
+    </a>
+
+    <a href="05-narrative-sparkline.html" class="option-card">
+      <div class="option-num">Option 5</div>
+      <div class="option-title">Narrative Sentence + Distribution Sparkline</div>
+      <div class="option-desc">
+        A natural-language summary paragraph with embedded numbers and verdict,
+        a histogram sparkline of the difference distribution with a tolerance
+        band overlay, and stat chips. Good for: readability, sharing screenshots,
+        users who want a story not a table.
+      </div>
+    </a>
+  </div>
+</div>
+
+</body>
+</html>

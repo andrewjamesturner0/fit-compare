@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option 5: Narrative Sentence + Distribution Sparkline</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg-app: #f6f7f9;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f1f3f5;
+    --border-subtle: #eef0f2;
+    --border-default: #d4d7dc;
+    --text-primary: #14161a;
+    --text-secondary: #5b6470;
+    --text-muted: #8a929c;
+    --accent: #0b6bcb;
+    --accent-soft: #e7f0fb;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.05);
+
+    --pass-bg: #eaf7ea;
+    --pass-text: #1a5c1a;
+    --fail-bg: #fdf0ed;
+    --fail-text: #7a2a1a;
+    --inconc-bg: #fff8e6;
+    --inconc-text: #8a5a00;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    padding: 32px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .mockup-container {
+    width: 100%;
+    max-width: 740px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 16px;
+  }
+
+  /* -- Narrative block -- */
+  .narrative-block {
+    margin-bottom: 24px;
+  }
+
+  .narrative-sentence {
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+  }
+
+  .narrative-sentence .file-label {
+    font-weight: 600;
+  }
+
+  .narrative-sentence .file-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin: 0 2px;
+  }
+
+  .narrative-sentence .stat-em {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  /* -- Verdict callout -- */
+  .verdict-callout {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 2px 10px;
+    border-radius: 999px;
+  }
+
+  .verdict-callout.pass {
+    background: var(--pass-bg);
+    color: var(--pass-text);
+  }
+  .verdict-callout.fail {
+    background: var(--fail-bg);
+    color: var(--fail-text);
+  }
+
+  /* -- Distribution sparkline area -- */
+  .sparkline-section {
+    background: var(--bg-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    margin-bottom: 20px;
+  }
+
+  .sparkline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+
+  .sparkline-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .sparkline-stats {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* -- The sparkline canvas area -- */
+  .sparkline-canvas {
+    position: relative;
+    height: 64px;
+    margin-bottom: 8px;
+  }
+
+  /* Simulated histogram bars */
+  .histogram {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 48px;
+    margin-bottom: 6px;
+  }
+
+  .hist-bar {
+    flex: 1;
+    background: var(--border-default);
+    border-radius: 1px 1px 0 0;
+    min-width: 4px;
+  }
+
+  .hist-bar.filled {
+    background: var(--accent);
+  }
+
+  .hist-bar.within-tolerance {
+    background: var(--accent);
+  }
+
+  .hist-bar.outside-tolerance {
+    background: var(--text-muted);
+  }
+
+  /* -- Tolerance band overlay -- */
+  .tolerance-band-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: var(--text-muted);
+    position: relative;
+  }
+
+  .tolerance-zone {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  .tolerance-marker {
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 48px;
+    background: var(--accent);
+    opacity: 0.35;
+  }
+
+  /* -- Stat chips row -- */
+  .stat-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .stat-chip {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .stat-chip-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  .stat-chip-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  /* -- Commentary text -- */
+  .commentary {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-container">
+  <div class="section-label">Comparison summary</div>
+
+  <!-- Narrative sentence -->
+  <div class="narrative-block">
+    <p class="narrative-sentence">
+      <span class="file-dot" style="background: #000000;"></span>
+      <span class="file-label">Assioma Left</span>
+      and
+      <span class="file-dot" style="background: #E69F00;"></span>
+      <span class="file-label">Assioma Right</span>
+      agree within expected tolerance:
+      <span class="stat-em">-0.5&thinsp;W</span> mean bias
+      (<span class="stat-em">-0.2%</span> of the 233&thinsp;W average),
+      with 95% of differences falling between
+      <span class="stat-em">-10.8&thinsp;W</span> and
+      <span class="stat-em">+9.8&thinsp;W</span>.
+      <span class="verdict-callout pass">Equivalent at &plusmn;3%</span>
+    </p>
+  </div>
+
+  <!-- Distribution sparkline -->
+  <div class="sparkline-section">
+    <div class="sparkline-header">
+      <span class="sparkline-title">Distribution of second-by-second differences</span>
+      <span class="sparkline-stats">n = 7,201</span>
+    </div>
+
+    <!-- Simulated histogram of differences -->
+    <div class="histogram">
+      <div class="hist-bar" style="height: 8%;"></div>
+      <div class="hist-bar" style="height: 14%;"></div>
+      <div class="hist-bar" style="height: 22%;"></div>
+      <div class="hist-bar" style="height: 32%;"></div>
+      <div class="hist-bar outside-tolerance" style="height: 38%;"></div>
+      <div class="hist-bar" style="height: 48%;"></div>
+      <div class="hist-bar" style="height: 64%;"></div>
+      <div class="hist-bar" style="height: 72%;"></div>
+      <div class="hist-bar" style="height: 82%;"></div>
+      <div class="hist-bar" style="height: 100%;"></div>
+      <div class="hist-bar" style="height: 92%;"></div>
+      <div class="hist-bar" style="height: 78%;"></div>
+      <div class="hist-bar" style="height: 62%;"></div>
+      <div class="hist-bar" style="height: 46%;"></div>
+      <div class="hist-bar" style="height: 34%;"></div>
+      <div class="hist-bar" style="height: 24%;"></div>
+      <div class="hist-bar outside-tolerance" style="height: 16%;"></div>
+      <div class="hist-bar" style="height: 8%;"></div>
+      <div class="hist-bar" style="height: 4%;"></div>
+    </div>
+
+    <div class="tolerance-band-labels">
+      <span>-20 W</span>
+      <span style="visibility:hidden;">.</span>
+      <span>-10 W</span>
+      <span>0</span>
+      <span>+10 W</span>
+      <span style="visibility:hidden;">.</span>
+      <span>+20 W</span>
+    </div>
+
+    <div style="display: flex; justify-content: center; margin-top: 8px; gap: 16px; font-size: 10px; color: var(--text-muted);">
+      <span>&#9632; Within &plusmn;3% tolerance (94.3%)</span>
+      <span>&#9634; Outside tolerance (5.7%)</span>
+    </div>
+  </div>
+
+  <!-- Stat chips row -->
+  <div class="stat-chips">
+    <div class="stat-chip">
+      <div class="stat-chip-label">CCC</div>
+      <div class="stat-chip-value">0.996</div>
+    </div>
+    <div class="stat-chip">
+      <div class="stat-chip-label">RMSE</div>
+      <div class="stat-chip-value">5.3 W</div>
+    </div>
+    <div class="stat-chip">
+      <div class="stat-chip-label">Effect size dz</div>
+      <div class="stat-chip-value">0.04</div>
+    </div>
+    <div class="stat-chip">
+      <div class="stat-chip-label">Pearson r</div>
+      <div class="stat-chip-value">0.998</div>
+    </div>
+    <div class="stat-chip">
+      <div class="stat-chip-label">CV of diffs</div>
+      <div class="stat-chip-value">2.2%</div>
+    </div>
+    <div class="stat-chip">
+      <div class="stat-chip-label">MAE</div>
+      <div class="stat-chip-value">4.1 W</div>
+    </div>
+  </div>
+
+  <p class="commentary">
+    Assioma Left and Right agree almost perfectly: the mean bias is negligible (-0.5&thinsp;W),
+    the limits of agreement (-10.8 to +9.8&thinsp;W) sit only slightly beyond a strict &plusmn;3%
+    band, and the concordance correlation coefficient (0.996) indicates near-perfect agreement
+    along the identity line. 94.3% of individual second-by-second differences fall within the
+    &plusmn;3% tolerance band. The TOST procedure confirms equivalence at the 3% margin.
+  </p>
+
+</div>
+
+</body>
+</html>

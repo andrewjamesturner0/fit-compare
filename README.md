@@ -13,7 +13,7 @@ Primary use case: comparing power meters on the same ride. Mixing formats is sup
 3. Files are automatically parsed and aligned
 4. Use the metric selector to switch between power, cadence, heart rate, speed, elevation, and temperature
 5. Drag horizontally on the graph to select a range on the aligned (reference) timebase. The graph immediately zooms to that exact range. A Selection / Overall toggle appears at the top of the stats panel; the panel defaults to Selection so the per-file figures show stats restricted to the range. Click Overall to switch back, or "Clear selection" to dismiss the range
-6. The stats panel below the graph shows descriptive statistics for each file in a figure-grid layout, with pairwise comparisons in a quieter strip beneath
+6. For two or more power files, the stats panel compares each non-reference file with the aligned reference. It shows an agreement verdict, both files' scoped figures, signed bias, a 90% confidence interval against the tolerance, limits of agreement, and supporting error measures. Other metrics keep the compact Pearson r, MAE, MPE, and N strip
 7. Expand "Adjust Offsets" to manually correct alignment if auto-alignment gets it wrong
 
 ## Build and run
@@ -24,6 +24,8 @@ npm run dev      # development server
 npm test         # test suite
 npm run lint     # lint checks
 npm run build    # production build
+./rebuild.sh      # fresh production build in dist
+./serve.sh 8080   # serve the rebuilt dist directory
 npm run preview  # preview production build
 ```
 
@@ -50,10 +52,14 @@ If correlation confidence is too low, the file falls back to a single zero-offse
 ### Stats
 
 - **Per-file:** mean, max, min, standard deviation (computed on the 1 Hz resampled grid, nulls excluded)
-- **Pairwise:** Pearson r, MAE, MPE (first uploaded file is used as reference for MPE; values near zero are excluded to avoid division blow-up)
+- **Power agreement:** each active non-reference file is compared with the store's aligned reference file. Signed differences are `comparison minus reference`, so a negative bias means the comparison meter reads lower
+- **Power verdict:** the 90% confidence interval for mean bias is compared with a fixed tolerance of `max(3% of the paired grand mean, 5 W)`. A result is Equivalent only when the interval is wholly inside the tolerance. An interval wholly beyond one side is Difference exceeds tolerance. An interval that touches or crosses a boundary is Inconclusive. Fewer than two paired samples gives Insufficient data
+- **Supporting power measures:** Bland-Altman bias and limits of agreement, CCC, RMSE, Cohen's dz, Pearson r, coefficient of variation of the differences, MAE, and paired N
+- **Other metrics:** cadence, heart rate, speed, elevation, and temperature retain the compact Pearson r, MAE, MPE, and N comparison. MPE uses the aligned reference file as its denominator and excludes values near zero to avoid division blow-up
 - Pause regions and nulls are excluded pairwise from all comparisons
 - Zeros are kept (coasting power is real data)
-- **Selection scope:** when a time range is selected on the graph, the panel defaults to Selection and recomputes the same per-file figures and pairwise strip over that range. The Selection / Overall toggle switches between the two scopes. Selections are stored on the reference (aligned) timebase; for non-reference files the range is translated through their alignment offsets before filtering, so the correct slice of each file is included regardless of its offset. Selections are clamped to the visible data extent and survive metric switches and offset nudges; they are cleared when all files are removed or when nudges push them out of bounds
+- **Selection scope:** when a time range is selected on the graph, the panel defaults to Selection and recomputes the full power agreement view or non-power strip over that range. The Selection / Overall toggle switches between the two scopes. Selections are stored on the reference (aligned) timebase; for non-reference files the range is translated through their alignment offsets before filtering, so the correct slice of each file is included regardless of its offset. Selections are clamped to the visible data extent and survive metric switches and offset nudges; they are cleared when all files are removed or when nudges push them out of bounds
+- **Confidence caveat:** adjacent 1 Hz readings are autocorrelated. The confidence intervals and verdicts are approximate descriptive summaries and may look more precise than the effective amount of independent data supports
 
 ### Graph vs stats
 

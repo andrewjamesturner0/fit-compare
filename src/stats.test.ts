@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { computeFileStats, computePairwiseStats } from './stats'
+import {
+  computeComparisonStats,
+  computeFileStats,
+  computePairwiseStats,
+} from './stats'
 import type { ResampledSeries, MetricKey, AlignmentResult } from './types'
 
 const M: MetricKey[] = ['power', 'cadence', 'heartRate', 'speed', 'elevation', 'temperature']
@@ -320,5 +324,252 @@ describe('computePairwiseStats', () => {
       })
       expect(result.n).toBe(4) // ts 1000, 2000, 3000, 4000
     })
+  })
+})
+
+describe('computeComparisonStats', () => {
+  const options = { marginPercent: 3, marginFloor: 5 }
+
+  it('uses comparison minus reference for signed values and sample SD', () => {
+    const ref = makeSeries([100, 100, 100, 100])
+    const other = makeSeries([99, 101, 103, 105])
+    const result = computeComparisonStats(ref, other, 'power', null, null, options)
+
+    // Differences are -1, 1, 3, 5: mean 2 and sample SD sqrt(20 / 3).
+    const expectedSd = Math.sqrt(20 / 3)
+    expect(result.bias).toBeCloseTo(2, 10)
+    expect(result.sdDiff).toBeCloseTo(expectedSd, 10)
+    expect(result.loaLower).toBeCloseTo(2 - 1.96 * expectedSd, 10)
+    expect(result.loaUpper).toBeCloseTo(2 + 1.96 * expectedSd, 10)
+
+    // df 3 has t(0.95) = 2.353363.
+    const halfWidth = 2.353363 * expectedSd / 2
+    expect(result.ciLower).toBeCloseTo(2 - halfWidth, 5)
+    expect(result.ciUpper).toBeCloseTo(2 + halfWidth, 5)
+  })
+
+  it.each([
+    [1, 6.313751514675],
+    [2, 2.919985580354],
+    [10, 1.812461122812],
+    [30, 1.697260886594],
+    [60, 1.670648864905],
+    [120, 1.657650899355],
+    [121, 1.657544319087],
+  ])('uses the expected 95th percentile t critical value for df %i', (df, expected) => {
+    const n = df + 1
+    const refValues = Array(n).fill(100)
+    const differences = Array.from({ length: n }, (_, i) => i - (n - 1) / 2)
+    const otherValues = differences.map((difference) => 100 + difference)
+    const result = computeComparisonStats(
+      makeSeries(refValues),
+      makeSeries(otherValues),
+      'power',
+      null,
+      null,
+      options,
+    )
+
+    const standardError = result.sdDiff! / Math.sqrt(n)
+    const impliedCritical = (result.ciUpper! - result.bias!) / standardError
+    expect(impliedCritical).toBeCloseTo(expected, 5)
+  })
+
+  it('returns all four conclusion states with strict margin boundaries', () => {
+    const equivalent = computeComparisonStats(
+      makeSeries([100, 200, 300]),
+      makeSeries([100, 200, 300]),
+      'power', null, null, options,
+    )
+    const different = computeComparisonStats(
+      makeSeries([100, 100, 100]),
+      makeSeries([110, 110, 110]),
+      'power', null, null, options,
+    )
+    const inconclusive = computeComparisonStats(
+      makeSeries([100, 100, 100]),
+      makeSeries([90, 100, 110]),
+      'power', null, null, options,
+    )
+    const boundary = computeComparisonStats(
+      makeSeries([100, 100, 100]),
+      makeSeries([105, 105, 105]),
+      'power', null, null, options,
+    )
+    const insufficient = computeComparisonStats(
+      makeSeries([100]),
+      makeSeries([100]),
+      'power', null, null, options,
+    )
+
+    expect(equivalent.conclusion).toBe('equivalent')
+    expect(different.conclusion).toBe('different')
+    expect(inconclusive.conclusion).toBe('inconclusive')
+    expect(boundary.ciLower).toBe(5)
+    expect(boundary.ciUpper).toBe(5)
+    expect(boundary.conclusion).toBe('inconclusive')
+    expect(insufficient.conclusion).toBe('insufficient-data')
+  })
+
+  it('uses 3 percent of the grand mean with a 5 W floor', () => {
+    const floorResult = computeComparisonStats(
+      makeSeries([100, 100]),
+      makeSeries([100, 100]),
+      'power', null, null, options,
+    )
+    const percentResult = computeComparisonStats(
+      makeSeries([300, 300]),
+      makeSeries([300, 300]),
+      'power', null, null, options,
+    )
+
+    expect(floorResult.equivalenceMargin).toBe(5)
+    expect(floorResult.equivalenceMarginPercent).toBe(5)
+    expect(floorResult.marginFloorApplied).toBe(true)
+    expect(percentResult.equivalenceMargin).toBe(9)
+    expect(percentResult.equivalenceMarginPercent).toBe(3)
+    expect(percentResult.marginFloorApplied).toBe(false)
+  })
+
+  it('handles identical constants and a constant non-zero offset', () => {
+    const identical = computeComparisonStats(
+      makeSeries([200, 200, 200]),
+      makeSeries([200, 200, 200]),
+      'power', null, null, options,
+    )
+    const offset = computeComparisonStats(
+      makeSeries([200, 200, 200]),
+      makeSeries([210, 210, 210]),
+      'power', null, null, options,
+    )
+
+    expect(identical.ccc).toBe(1)
+    expect(identical.cohensDz).toBe(0)
+    expect(offset.ccc).toBe(0)
+    expect(offset.cohensDz).toBeNull()
+  })
+
+  it('returns null percentages when the grand mean is near zero', () => {
+    const result = computeComparisonStats(
+      makeSeries([-1, -2]),
+      makeSeries([1, 2]),
+      'power', null, null, options,
+    )
+
+    expect(result.grandMean).toBe(0)
+    expect(result.biasPercent).toBeNull()
+    expect(result.loaLowerPercent).toBeNull()
+    expect(result.loaUpperPercent).toBeNull()
+    expect(result.equivalenceMarginPercent).toBeNull()
+    expect(result.rmsePercent).toBeNull()
+    expect(result.cvDiff).toBeNull()
+  })
+
+  it('calculates agreement and legacy metrics on known values', () => {
+    const result = computeComparisonStats(
+      makeSeries([1, 2, 3]),
+      makeSeries([2, 2, 5]),
+      'power', null, null,
+      { marginPercent: 3, marginFloor: 0 },
+    )
+
+    expect(result.grandMean).toBeCloseTo(2.5, 10)
+    expect(result.bias).toBeCloseTo(1, 10)
+    expect(result.cohensDz).toBeCloseTo(1, 10)
+    expect(result.ccc).toBeCloseTo(0.6, 10)
+    expect(result.rmse).toBeCloseTo(Math.sqrt(5 / 3), 10)
+    expect(result.rmsePercent).toBeCloseTo(51.63977795, 7)
+    expect(result.cvDiff).toBeCloseTo(40, 10)
+    expect(result.r).toBeCloseTo(Math.sqrt(3) / 2, 10)
+    expect(result.mae).toBeCloseTo(1, 10)
+    expect(result.mpe).toBeCloseTo(55.55555556, 7)
+  })
+
+  it.each([
+    [{ marginPercent: 0, marginFloor: 5 }, 'marginPercent'],
+    [{ marginPercent: -1, marginFloor: 5 }, 'marginPercent'],
+    [{ marginPercent: Number.NaN, marginFloor: 5 }, 'marginPercent'],
+    [{ marginPercent: Number.POSITIVE_INFINITY, marginFloor: 5 }, 'marginPercent'],
+    [{ marginPercent: 3, marginFloor: -1 }, 'marginFloor'],
+    [{ marginPercent: 3, marginFloor: Number.POSITIVE_INFINITY }, 'marginFloor'],
+  ])('rejects invalid options %#', (invalidOptions, field) => {
+    expect(() => computeComparisonStats(
+      makeSeries([100, 100]),
+      makeSeries([100, 100]),
+      'power', null, null,
+      invalidOptions,
+    )).toThrow(new RegExp(field))
+  })
+
+  it('preserves actual pair counts for zero and one pair', () => {
+    const zeroPairs = computeComparisonStats(
+      makeSeries([100, null]),
+      makeSeries([null, 100]),
+      'power', null, null, options,
+    )
+    const onePair = computeComparisonStats(
+      makeSeries([100, null]),
+      makeSeries([100, 100]),
+      'power', null, null, options,
+    )
+
+    expect(zeroPairs.n).toBe(0)
+    expect(zeroPairs.bias).toBeNull()
+    expect(onePair.n).toBe(1)
+    expect(onePair.bias).toBeNull()
+  })
+
+  it('keeps zeros, excludes nulls, and applies the selected range', () => {
+    const result = computeComparisonStats(
+      makeSeries([0, 100, null, 300]),
+      makeSeries([0, 110, 220, 330]),
+      'power', null, null,
+      { ...options, range: { fromTime: 0, toTime: 2000 } },
+    )
+
+    expect(result.n).toBe(2)
+    expect(result.bias).toBe(5)
+  })
+
+  it('uses aligned offsets and excludes pause regions across segments', () => {
+    const ref = makeSeries([100, 200, 300, 400, 500, 600, 700, 800])
+    const other = makeSeries([100, 200, 300, 600, 700, 800, null, null])
+    const refAlignment: AlignmentResult = {
+      status: 'warning',
+      segments: [
+        { fromTime: 0, toTime: 2000, offsetSeconds: 0 },
+        { fromTime: 5000, toTime: 7000, offsetSeconds: 0 },
+      ],
+    }
+    const otherAlignment: AlignmentResult = {
+      status: 'warning',
+      segments: [
+        { fromTime: 0, toTime: 2000, offsetSeconds: 0 },
+        { fromTime: 3000, toTime: 5000, offsetSeconds: 2 },
+      ],
+    }
+
+    const result = computeComparisonStats(
+      ref, other, 'power', refAlignment, otherAlignment,
+      { ...options, range: { fromTime: 1000, toTime: 6000 } },
+    )
+
+    expect(result.n).toBe(4)
+    expect(result.bias).toBe(0)
+  })
+
+  it('matches legacy r, MAE, MPE, and N on the same pairs', () => {
+    const ref = makeSeries([0, 100, null, 300, 500])
+    const other = makeSeries([0, 110, 220, 330, 450])
+    const range = { fromTime: 0, toTime: 3000 }
+    const legacy = computePairwiseStats(ref, other, 'power', null, null, range)
+    const comparison = computeComparisonStats(
+      ref, other, 'power', null, null, { ...options, range },
+    )
+
+    expect(comparison.n).toBe(legacy.n)
+    expect(comparison.r).toBeCloseTo(legacy.r!, 12)
+    expect(comparison.mae).toBeCloseTo(legacy.mae!, 12)
+    expect(comparison.mpe).toBeCloseTo(legacy.mpe!, 12)
   })
 })

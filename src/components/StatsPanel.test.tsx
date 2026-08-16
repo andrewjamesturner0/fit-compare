@@ -132,10 +132,10 @@ describe('StatsPanel', () => {
     expect(useStore.getState().selection).toBeNull()
   })
 
-  it('renders pairwise comparisons in the demoted strip when there are 2+ files', () => {
-    const f1 = makeFileEntry('0', 'ref.fit', makeSeries([100, 200, 300, 400, 500]))
-    const f2 = makeFileEntry('1', 'other.fit', makeSeries([110, 210, 310, 410, 510]))
-    useStore.setState({ files: [f1, f2], referenceFileId: '0' })
+  it('renders non-power comparisons in the demoted strip when there are 2+ files', () => {
+    const f1 = makeFileEntry('0', 'ref.fit', makeSeries([80, 90, 100, 110, 120], 0, 'cadence'))
+    const f2 = makeFileEntry('1', 'other.fit', makeSeries([82, 92, 102, 112, 122], 0, 'cadence'))
+    useStore.setState({ files: [f1, f2], referenceFileId: '0', selectedMetric: 'cadence' })
 
     render(<StatsPanel />)
     const primary = screen.getByLabelText('Per-file statistics')
@@ -143,6 +143,93 @@ describe('StatsPanel', () => {
     // The non-reference file name appears in the strip
     expect(within(strip).getByText('other.fit')).toBeTruthy()
     expect(within(primary).queryByText(/Pairwise vs/)).toBeNull()
+  })
+
+  it('uses the stored non-first reference in the non-power strip', () => {
+    const first = makeFileEntry('0', 'first.fit', makeSeries([82, 92, 102], 0, 'cadence'))
+    const reference = makeFileEntry('1', 'reference.fit', makeSeries([80, 90, 100], 0, 'cadence'))
+    useStore.setState({
+      files: [first, reference],
+      referenceFileId: '1',
+      selectedMetric: 'cadence',
+    })
+
+    render(<StatsPanel />)
+    const strip = screen.getByLabelText('Pairwise comparisons')
+    expect(within(strip).getByText(/Pairwise vs reference.fit/)).toBeInTheDocument()
+    expect(within(strip).getByText('first.fit')).toBeInTheDocument()
+  })
+
+  it('renders the power agreement view instead of per-file rows for two files', () => {
+    const f1 = makeFileEntry('0', 'ref.fit', makeSeries([100, 200, 300, 400]))
+    const f2 = makeFileEntry('1', 'other.fit', makeSeries([100, 200, 300, 400]))
+    useStore.setState({ files: [f1, f2], referenceFileId: '0' })
+
+    render(<StatsPanel />)
+    expect(screen.getByLabelText('Power agreement comparisons')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Per-file statistics')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Pairwise comparisons')).not.toBeInTheDocument()
+  })
+
+  it('uses a non-first stored reference and comparison-minus-reference sign', () => {
+    const first = makeFileEntry('0', 'first.fit', makeSeries([110, 210, 310]))
+    const reference = makeFileEntry('1', 'reference.fit', makeSeries([100, 200, 300]))
+    useStore.setState({ files: [first, reference], referenceFileId: '1' })
+
+    render(<StatsPanel />)
+    const group = screen.getByRole('region', { name: 'reference.fit compared with first.fit' })
+    expect(within(group).getByText('Reference - 3 scoped samples')).toBeInTheDocument()
+    expect(within(group).getByText('Comparison minus reference')).toBeInTheDocument()
+    expect(within(group).getAllByText('+10.0 W').length).toBeGreaterThan(0)
+  })
+
+  it('preserves active-file order and maps three-file comparisons correctly', () => {
+    const comparisonA = makeFileEntry('0', 'comparison-a.fit', makeSeries([95, 195, 295]))
+    const reference = makeFileEntry('1', 'reference.fit', makeSeries([100, 200, 300]))
+    const comparisonB = makeFileEntry('2', 'comparison-b.fit', makeSeries([110, 210, 310]))
+    useStore.setState({ files: [comparisonA, reference, comparisonB], referenceFileId: '1' })
+
+    render(<StatsPanel />)
+    const groups = screen.getAllByRole('region', { name: /reference.fit compared with/ })
+    expect(groups).toHaveLength(2)
+    expect(groups[0]).toHaveAccessibleName('reference.fit compared with comparison-a.fit')
+    expect(groups[1]).toHaveAccessibleName('reference.fit compared with comparison-b.fit')
+    expect(within(groups[0]).getAllByText('-5.0 W').length).toBeGreaterThan(0)
+    expect(within(groups[1]).getAllByText('+10.0 W').length).toBeGreaterThan(0)
+  })
+
+  it('recomputes the power verdict when switching selection and overall scope', () => {
+    const reference = makeFileEntry('0', 'reference.fit', makeSeries([100, 100, 100, 100]))
+    const comparison = makeFileEntry('1', 'comparison.fit', makeSeries([100, 100, 120, 120]))
+    useStore.setState({ files: [reference, comparison], referenceFileId: '0' })
+    useStore.getState().setSelection({ fromTime: 0, toTime: 1000 })
+
+    render(<StatsPanel />)
+    expect(screen.getByRole('status')).toHaveTextContent('Equivalent within tolerance')
+    fireEvent.click(within(screen.getByRole('tablist')).getByText('Overall'))
+    expect(screen.getByRole('status')).toHaveTextContent('Inconclusive')
+  })
+
+  it('shows file descriptives but marks agreement unavailable after alignment failure', () => {
+    const reference = makeFileEntry('0', 'reference.fit', makeSeries([100, 200, 300]))
+    const comparison = makeFileEntry('1', 'comparison.fit', makeSeries([100, 200, 300]))
+    comparison.alignmentResult = { status: 'failed', segments: [], warning: 'No match' }
+    useStore.setState({ files: [reference, comparison], referenceFileId: '0' })
+
+    render(<StatsPanel />)
+    expect(screen.getAllByText('Agreement unavailable because alignment failed.').length).toBeGreaterThan(0)
+    expect(screen.getByText('Reference - 3 scoped samples')).toBeInTheDocument()
+    expect(screen.getByText('3 scoped samples')).toBeInTheDocument()
+  })
+
+  it('shows insufficient data when fewer than two paired samples remain', () => {
+    const reference = makeFileEntry('0', 'reference.fit', makeSeries([100, null]))
+    const comparison = makeFileEntry('1', 'comparison.fit', makeSeries([100, 200]))
+    useStore.setState({ files: [reference, comparison], referenceFileId: '0' })
+
+    render(<StatsPanel />)
+    expect(screen.getByRole('status')).toHaveTextContent('Insufficient paired data')
+    expect(screen.getByRole('status')).toHaveTextContent('Paired N 1')
   })
 
   it('does not render the pairwise strip when only one file is loaded', () => {

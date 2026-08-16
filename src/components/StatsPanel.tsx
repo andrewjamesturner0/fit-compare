@@ -1,9 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store'
-import { computeFileStats, computePairwiseStats } from '../stats'
+import {
+  computeComparisonStats,
+  computeFileStats,
+  computePairwiseStats,
+} from '../stats'
 import type { FileStats, PairwiseStats } from '../stats'
 import { getFileColor, METRIC_LABELS, METRIC_UNITS } from '../types'
 import type { FileEntry } from '../types'
+import { ComparisonView } from './ComparisonView'
+import type { ComparisonRow } from './ComparisonView'
 
 type Scope = 'selection' | 'overall'
 
@@ -33,6 +39,7 @@ function formatDuration(ms: number): string {
 
 export function StatsPanel() {
   const files = useStore((s) => s.files)
+  const referenceFileId = useStore((s) => s.referenceFileId)
   const selectedMetric = useStore((s) => s.selectedMetric)
   const selection = useStore((s) => s.selection)
   const setSelection = useStore((s) => s.setSelection)
@@ -46,67 +53,89 @@ export function StatsPanel() {
     if (selection !== null) setScope('selection')
   }
 
-  const activeFiles = files.filter(
-    (f) =>
-      f.parseResult?.status !== 'error'
-      && f.resampledSeries
-      && f.resampledSeries.timestamps.length > 0,
+  const activeFiles = useMemo(
+    () => files.filter(
+      (f) =>
+        f.parseResult?.status !== 'error'
+        && f.resampledSeries
+        && f.resampledSeries.timestamps.length > 0,
+    ),
+    [files],
+  )
+
+  const referenceFile = useMemo(
+    () => activeFiles.find((file) => file.id === referenceFileId) ?? activeFiles[0],
+    [activeFiles, referenceFileId],
+  )
+  const comparisonFiles = useMemo(
+    () => activeFiles.filter((file) => file.id !== referenceFile?.id),
+    [activeFiles, referenceFile],
   )
 
   const fileStatsOverall = useMemo(
-    () =>
-      activeFiles.map((f) =>
-        computeFileStats(f.resampledSeries!, selectedMetric, f.alignmentResult),
-      ),
+    () => new Map(activeFiles.map((file) => [
+      file.id,
+      computeFileStats(file.resampledSeries!, selectedMetric, file.alignmentResult),
+    ])),
     [activeFiles, selectedMetric],
   )
 
   const fileStatsSelection = useMemo(
     () =>
       selection
-        ? activeFiles.map((f) =>
-            computeFileStats(f.resampledSeries!, selectedMetric, f.alignmentResult, selection),
-          )
+        ? new Map(activeFiles.map((file) => [
+            file.id,
+            computeFileStats(file.resampledSeries!, selectedMetric, file.alignmentResult, selection),
+          ]))
         : null,
     [activeFiles, selectedMetric, selection],
   )
 
   const pairwiseStatsOverall = useMemo(() => {
-    if (activeFiles.length < 2) return []
-    const ref = activeFiles[0]
-    const results: PairwiseStats[] = []
-    for (let i = 1; i < activeFiles.length; i++) {
-      results.push(
-        computePairwiseStats(
-          ref.resampledSeries!,
-          activeFiles[i].resampledSeries!,
-          selectedMetric,
-          ref.alignmentResult,
-          activeFiles[i].alignmentResult,
-        ),
-      )
-    }
-    return results
-  }, [activeFiles, selectedMetric])
+    if (!referenceFile || selectedMetric === 'power') return []
+    return comparisonFiles.map((file) => computePairwiseStats(
+      referenceFile.resampledSeries!,
+      file.resampledSeries!,
+      selectedMetric,
+      referenceFile.alignmentResult,
+      file.alignmentResult,
+    ))
+  }, [comparisonFiles, referenceFile, selectedMetric])
 
   const pairwiseStatsSelection = useMemo(() => {
-    if (!selection || activeFiles.length < 2) return null
-    const ref = activeFiles[0]
-    const results: PairwiseStats[] = []
-    for (let i = 1; i < activeFiles.length; i++) {
-      results.push(
-        computePairwiseStats(
-          ref.resampledSeries!,
-          activeFiles[i].resampledSeries!,
-          selectedMetric,
-          ref.alignmentResult,
-          activeFiles[i].alignmentResult,
+    if (!selection || !referenceFile || selectedMetric === 'power') return null
+    return comparisonFiles.map((file) => computePairwiseStats(
+      referenceFile.resampledSeries!,
+      file.resampledSeries!,
+      selectedMetric,
+      referenceFile.alignmentResult,
+      file.alignmentResult,
+      selection,
+    ))
+  }, [comparisonFiles, referenceFile, selectedMetric, selection])
+
+  const comparisonRowsOverall = useMemo(
+    () => selectedMetric === 'power'
+      ? buildComparisonRows(
+          referenceFile,
+          comparisonFiles,
+          fileStatsOverall,
+        )
+      : [],
+    [comparisonFiles, fileStatsOverall, referenceFile, selectedMetric],
+  )
+
+  const comparisonRowsSelection = useMemo(
+    () => selectedMetric === 'power' && selection && fileStatsSelection
+      ? buildComparisonRows(
+          referenceFile,
+          comparisonFiles,
+          fileStatsSelection,
           selection,
-        ),
-      )
-    }
-    return results
-  }, [activeFiles, selectedMetric, selection])
+        )
+      : null,
+    [comparisonFiles, fileStatsSelection, referenceFile, selectedMetric, selection],
+  )
 
   if (activeFiles.length === 0) {
     return null
@@ -119,6 +148,10 @@ export function StatsPanel() {
 
   const fileStats = activeScope === 'selection' && fileStatsSelection ? fileStatsSelection : fileStatsOverall
   const pairwiseStats = activeScope === 'selection' && pairwiseStatsSelection ? pairwiseStatsSelection : pairwiseStatsOverall
+  const comparisonRows = activeScope === 'selection' && comparisonRowsSelection
+    ? comparisonRowsSelection
+    : comparisonRowsOverall
+  const showPowerComparison = selectedMetric === 'power' && activeFiles.length >= 2
 
   return (
     <div className="bg-white border-t p-4" style={{ borderColor: 'var(--border-subtle)' }}>
@@ -146,17 +179,61 @@ export function StatsPanel() {
         )}
       </div>
 
-      <PrimaryStats activeFiles={activeFiles} stats={fileStats} unit={metricUnit} />
+      {showPowerComparison
+        ? (
+            <ComparisonView
+              rows={comparisonRows}
+              scopeLabel={activeScope === 'selection' ? 'in selection' : undefined}
+            />
+          )
+        : <PrimaryStats activeFiles={activeFiles} stats={fileStats} unit={metricUnit} />}
 
-      {pairwiseStats.length > 0 && (
+      {!showPowerComparison && pairwiseStats.length > 0 && referenceFile && (
         <PairwiseStrip
-          activeFiles={activeFiles}
+          referenceFile={referenceFile}
+          comparisonFiles={comparisonFiles}
           stats={pairwiseStats}
           scopeLabel={activeScope === 'selection' ? 'in selection' : null}
         />
       )}
     </div>
   )
+}
+
+function buildComparisonRows(
+  referenceFile: FileEntry | undefined,
+  comparisonFiles: FileEntry[],
+  fileStats: Map<string, FileStats>,
+  range?: { fromTime: number; toTime: number },
+): ComparisonRow[] {
+  if (!referenceFile) return []
+  const referenceFileStats = fileStats.get(referenceFile.id)
+  if (!referenceFileStats) return []
+
+  return comparisonFiles.map((comparisonFile) => {
+    const comparisonFileStats = fileStats.get(comparisonFile.id)!
+
+    const alignmentFailed = referenceFile.alignmentResult?.status === 'failed'
+      || comparisonFile.alignmentResult?.status === 'failed'
+
+    return {
+      referenceFile,
+      comparisonFile,
+      referenceFileStats,
+      comparisonFileStats,
+      comparisonStats: alignmentFailed
+        ? null
+        : computeComparisonStats(
+            referenceFile.resampledSeries!,
+            comparisonFile.resampledSeries!,
+            'power',
+            referenceFile.alignmentResult,
+            comparisonFile.alignmentResult,
+            { range, marginPercent: 3, marginFloor: 5 },
+          ),
+      unavailableReason: alignmentFailed ? 'Agreement unavailable because alignment failed.' : undefined,
+    }
+  })
 }
 
 function ScopeToggle({
@@ -222,13 +299,13 @@ function PrimaryStats({
   unit,
 }: {
   activeFiles: FileEntry[]
-  stats: FileStats[]
+  stats: Map<string, FileStats>
   unit: string
 }) {
   return (
     <div className="flex flex-col gap-2" aria-label="Per-file statistics">
-      {activeFiles.map((f, i) => (
-        <FigureRow key={f.id} file={f} stats={stats[i]} unit={unit} />
+      {activeFiles.map((f) => (
+        <FigureRow key={f.id} file={f} stats={stats.get(f.id)!} unit={unit} />
       ))}
     </div>
   )
@@ -290,16 +367,17 @@ function SuppStat({ label, value }: { label: string; value: string }) {
 }
 
 function PairwiseStrip({
-  activeFiles,
+  referenceFile,
+  comparisonFiles,
   stats,
   scopeLabel,
 }: {
-  activeFiles: FileEntry[]
+  referenceFile: FileEntry
+  comparisonFiles: FileEntry[]
   stats: PairwiseStats[]
   scopeLabel: string | null
 }) {
-  if (activeFiles.length < 2) return null
-  const ref = activeFiles[0]
+  if (comparisonFiles.length === 0) return null
   return (
     <div
       className="mt-4 rounded-md px-4 py-3"
@@ -310,17 +388,17 @@ function PairwiseStrip({
         className="text-[10px] font-medium uppercase mb-2"
         style={{ color: 'var(--text-muted)', letterSpacing: '0.08em' }}
       >
-        Pairwise vs {ref.name}{scopeLabel ? ` (${scopeLabel})` : ''}
+        Pairwise vs {referenceFile.name}{scopeLabel ? ` (${scopeLabel})` : ''}
       </div>
       <div className="flex flex-col gap-1.5">
-        {activeFiles.slice(1).map((f, pi) => {
+        {comparisonFiles.map((f, pi) => {
           const s = stats[pi]
           return (
             <div key={f.id} className="flex items-center gap-2 flex-wrap text-xs" style={{ color: 'var(--text-secondary)' }}>
               <span className="inline-flex items-center gap-1.5 min-w-0" style={{ minWidth: 240 }}>
                 <span
                   className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: getFileColor(ref.colorIndex) }}
+                  style={{ backgroundColor: getFileColor(referenceFile.colorIndex) }}
                 />
                 <span style={{ color: 'var(--text-muted)' }}>vs</span>
                 <span

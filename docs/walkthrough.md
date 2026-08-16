@@ -4,9 +4,9 @@
 
 SPNDAT is a single-page web application that takes multiple .fit cycling files (from Garmin, Wahoo, or Hammerhead head units), aligns their timestamps so they share a common time axis, and overlays them on an interactive graph with descriptive statistics. The primary use case is comparing power meters: you ride with two devices recording simultaneously, then drop both files into the app to see how closely they agree.
 
-The application runs entirely in the browser. There is no server, no database, no user accounts, no file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero server, zero persistence) shapes every architectural choice. The app is a static set of HTML, CSS, and JS files; it can be served from any HTTP server or opened from a `file://` URL in a pinch (though `file://` is not officially supported).
+The application runs entirely in the browser. There is no application server, database, user account, or file upload to any cloud. All parsing, alignment, and rendering happens on the client, in JavaScript. This constraint (zero back end, zero persistence) shapes every architectural choice. The production build is a static set of HTML, CSS, and JS files served over HTTP; `./serve.sh 8080` serves a fresh `dist` build locally.
 
-A user drops one or more .fit or .tcx files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart. A statistics panel below the chart shows per-file descriptive stats in a figure-grid layout, with pairwise comparisons (Pearson r, mean absolute error, mean percentage error) in a quieter strip beneath. Dragging on the graph creates a time-range selection on the aligned (reference) timebase. The graph immediately zooms to that exact range. A Selection / Overall toggle then appears at the top of the panel, defaulting to Selection so the figures recompute over the chosen range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
+A user drops one or more .fit or .tcx files onto the page. The app parses them, resamples their time-series data to a 1 Hz common grid, runs a three-pass cross-correlation algorithm to auto-align the time axes (handling different start times and mid-ride pause/resume events), then renders the overlaid power (or cadence, heart rate, speed, elevation, or temperature) traces on an interactive chart. For power, the statistics panel compares every non-reference file with the aligned reference and shows an agreement verdict, signed bias, confidence interval, limits of agreement, per-file figures, and supporting error measures. Other metrics keep the compact Pearson r, mean absolute error, and mean percentage error strip. Dragging on the graph creates a time-range selection on the aligned reference timebase. The graph immediately zooms to that exact range. A Selection / Overall toggle then appears at the top of the panel, defaulting to Selection so the figures recompute over the chosen range. If the auto-alignment gets something wrong, a collapsible offset-control panel lets the user manually adjust per-segment time offsets.
 
 ## 2. The N-second architecture
 
@@ -29,7 +29,8 @@ A user drops one or more .fit or .tcx files onto the page. The app parses them, 
   store.ts (Zustand) -- single state tree: files[], referenceFileId, selectedMetric,
       |                 per-file ParseResult, ResampledSeries, AlignmentResult
       +---> FitGraph.tsx     -- uPlot canvas, reads raw records + offsets
-      +---> StatsPanel.tsx   -- figure grid + pairwise strip, reads resampled grid + offsets
+      +---> StatsPanel.tsx   -- selects reference, scope, and power/non-power stats view
+      |       +---> ComparisonView.tsx -- power verdict, cards, interval, supporting metrics
       +---> OffsetControls.tsx -- per-segment offset editor, writes to store
       +---> FileDropZone.tsx -- drag-and-drop file ingestion, writes to store
       +---> MetricSelector.tsx -- toggles selectedMetric in store
@@ -167,7 +168,7 @@ Both parsers return `ParseResult` with status `ok`, `warning`, or `error`. Error
 
 ## 6. The UI layer
 
-The UI is a single-page React app with no routing. Six components compose the page vertically:
+The UI is a single-page React app with no routing. Seven components compose the page vertically:
 
 |Component|Job|
 |-|-|
@@ -175,7 +176,8 @@ The UI is a single-page React app with no routing. Six components compose the pa
 |`FileDropZone.tsx`|Drag-and-drop zone + hidden file input. Filters drops to .fit and .tcx via `isSupportedFile`. Displays file cards with colour swatch, device name, record count, parse status, warnings, and remove button.|
 |`MetricSelector.tsx`|Row of pill buttons for each of six metrics. Greys out metrics absent from all loaded files.|
 |`FitGraph.tsx`|uPlot canvas. Builds a shared timeline from the union of all files' offset-adjusted timestamps. Handles resize via `ResizeObserver`. A horizontal drag creates a time-range selection and immediately zooms the x-axis to the selected range; the brush is two-way bound to the store's `selection` state.|
-|`StatsPanel.tsx`|Per-file descriptive stats rendered as a figure-grid (large Mean on the left, supporting Max/Min/SD/N on the right per file). Pairwise comparisons against the first file appear in a demoted strip below. When `selection` is set, a Selection / Overall toggle appears in the panel header (defaulting to Selection); the same figure-grid recomputes over the selected range, alongside a "Clear selection" button.|
+|`StatsPanel.tsx`|Resolves the store's aligned reference file, computes overall and selected-range stats, and chooses the power agreement view or the non-power legacy strip. One active file keeps the per-file figure grid. The Selection / Overall toggle and "Clear selection" action apply to every view.|
+|`ComparisonView.tsx`|Presents one reference-versus-comparison group per non-reference power file: four-state verdict banner, file cards, signed bias and limits of agreement, 90% confidence interval plotted against tolerance, supporting metrics, and the autocorrelation caveat. It reads props and does not access the store.|
 |`OffsetControls.tsx`|Collapsible panel with per-file, per-segment offset editors. Link-all-segments checkbox. Global nudge-all-files controls.|
 
 ### 6.1 Why uPlot
@@ -190,7 +192,7 @@ The store holds all application state (files, parse results, alignment results, 
 
 Zustand was chosen over React Context. It does not require a provider wrapper. Selectors avoid unnecessary re-renders (Context forces re-render of all consumers when any part of the context changes). It supports reading state imperatively (`get()`) inside async actions, which matters for `addFiles` (parse a file, push it to the list, then run alignment on the new list, all within the same action). And it has zero boilerplate compared to Redux.
 
-The store alone is 270 lines. The actions are pure Zustand `set` calls; there is no middleware.
+The store alone is about 270 lines. The actions are pure Zustand `set` calls; there is no middleware.
 
 ### 6.3 Duplicate detection
 
@@ -217,7 +219,11 @@ When the user edits an offset in `OffsetControls`, the store mutates the `alignm
 
 The graph selection is a thin two-way binding over the store's `selection` field. Dragging fires uPlot's `setSelect` hook, which converts the pixel range to data coordinates, calls `setSelection`, and immediately sets the x-axis scale to those exact bounds. A guard ref prevents the reverse path (store -> chart re-apply via `u.setSelect`) from re-entering the hook. The selection itself is stored as `{ fromTime, toTime }` in milliseconds on the **reference (aligned) timebase**, which is the same unit the graph's x-axis displays.
 
-Because each file's `ResampledSeries.timestamps` are on its own local timebase, `computeFileStats` translates the aligned range through that file's segment offsets before filtering (the reference file always has zero offsets, so its local and aligned timebases coincide). `computePairwiseStats` walks the reference file's timestamps and can short-circuit on the range directly.
+Because each file's `ResampledSeries.timestamps` are on its own local timebase, `computeFileStats` translates the aligned range through that file's segment offsets before filtering (the reference file always has zero offsets, so its local and aligned timebases coincide). A private paired-data helper walks the reference file's timestamps, maps each aligned timestamp to the comparison file's local time, and excludes nulls and pause regions. `computePairwiseStats` and `computeComparisonStats` both use those exact pairs, so the legacy and power results cannot drift onto different sample sets.
+
+For power, `computeComparisonStats` defines every signed difference as `comparison minus reference`. It uses the sample standard deviation of those paired differences for Bland-Altman limits, Cohen's dz, and the 90% confidence interval for mean bias. The effective tolerance is fixed at the larger of 3% of the paired grand mean and 5 W. A confidence interval wholly inside the open tolerance bounds is `equivalent`; one wholly beyond either bound is `different`; one that touches or crosses a bound is `inconclusive`; and fewer than two pairs is `insufficient-data`. The UI uses the clearer text "Difference exceeds tolerance" for the different state.
+
+This verdict is deliberately limited to power because a 5 W floor has no useful meaning for cadence, heart rate, speed, elevation, or temperature. Those metrics continue to show Pearson r, MAE, MPE, and N. The full aligned 1 Hz grid is used and zeros are kept. Because adjacent readings are autocorrelated, the t interval can be too narrow; the UI describes the result as an approximate descriptive summary rather than formal proof of equivalence.
 
 Selections are clamped to the combined data extent in `setSelection` and again in every store action that can shift extents (`removeFile`, `recomputeAlignment`, `nudgeOffset`, `setSegmentOffset`, `nudgeAllOffsets`); a clamped selection that collapses to zero width becomes `null`. Selections survive metric switches and small offset nudges, but disappear when files are removed in a way that pushes the selection entirely out of bounds.
 
@@ -229,11 +235,13 @@ Selections are clamped to the combined data extent in `setSelection` and again i
 |`src/tcx.test.ts`|`parseTcxFile`: full trackpoint extraction, metadata (sport, device, startTime), missing-power-as-null, no-power warning, no-records warning, malformed XML, missing Activity, multi-Lap aggregation, fallback startTime.|9|
 |`src/resample.test.ts`|`resample()` with synthetic `FitSession`: empty, evenly spaced, rounding, gaps, single record, irregular spacing, same-tick overwrite, multi-metric nulls.|8|
 |`src/align.test.ts`|`alignPair` and `alignAll`: synthetic pause regression (+133s jump), known-offset detection, zero-offset files, single pause, no-pause, no-overlap failure, random-noise failure, empty series, multi-file align, mixed success/failure, unrelated-workout bias-to-zero, scale-invariance, single-pause coalescing, two-sequential-pause coalescing, >2-minute offset jump recovery, sensor-dropout rejection, leading/trailing extent-gap filtering, two true offset jumps, ref-pause-then-other-pause, same-offset no-split, recorded-data regime changes, and segment-boundary cutover assertions.|25|
-|`src/stats.test.ts`|`computeFileStats` and `computePairwiseStats`: mean/max/min/stddev, nulls, all nulls, zeros, single value, perfect correlation, negative correlation, pairwise null exclusion, MAE, MPE epsilon, insufficient pairs, selection-range translations (reference file, non-reference file with non-zero offset, zero-sample range, multi-segment ranges across pause gaps), and multi-segment pairwise lookups with non-zero offsets.|21|
+|`src/stats.test.ts`|`computeFileStats`, `computePairwiseStats`, and `computeComparisonStats`: descriptives, shared-pair parity, sign, sample SD, limits of agreement, t-critical branches, all verdict boundaries, fixed tolerance, constant and zero-mean cases, CCC, RMSE, Cohen's dz, CV, Pearson r, MAE, MPE, nulls, zeros, selection ranges, offsets, pauses, and multi-segment alignment.|44|
 |`src/alignmentTime.test.ts`|`localToAligned`, `alignedToLocal`, `segmentAlignedWindow`, `isInPause`, `offsetForLocalTs`, `alignedRangeToLocalWindows`: fallback behaviour, multi-segment, negative offsets, large offset gaps (>60 s), precision at segment boundaries.|25|
 |`src/store.test.ts`|Zustand store with mocked parser and resampler: add/remove/clear, duplicate detection, reference selection, nudge, segment offset, metric switching, and selection lifecycle (clamping, out-of-bounds clearing, clearAll/removeFile cleanup).|18|
-|`src/components/StatsPanel.test.tsx`|`StatsPanel` renders overall stats with no toggle when there is no selection; uses the selected metric's unit; defaults to Selection scope and hides Overall numbers when a selection is active; switches scope on toggle click; the "Clear selection" button dismisses the selection; pairwise comparisons render only in the demoted strip and only with 2+ files.|8|
+|`src/components/StatsPanel.test.tsx`|Single-file figures, power/non-power branching, stored reference choice, comparison sign, three-file order and mapping, selection recomputation, Clear selection, failed alignment, and insufficient paired data.|15|
+|`src/components/ComparisonView.test.tsx`|All four verdict texts, file cards, effective margin and floor copy, null formatting, sign explanation, supporting metrics, paired N, alignment-unavailable copy, and the autocorrelation caveat.|8|
 |`src/components/FitGraph.test.tsx`|Component mount smoke test, exact selection zoom, and no-zoom checks for cleared or invalid brushes.|4|
+|`src/components/FitGraph.integration.test.tsx`|Real-uPlot drag integration: a user drag stores the accepted selection and zooms to the same bounds.|1|
 
 All tests use Vitest with jsdom. The test setup file (`src/test-setup.ts`) provides a mock `window.matchMedia` (needed by uPlot at import time) and the `@testing-library/jest-dom` matchers. The parser and resample mocks in store tests prevent the store from calling real I/O.
 
@@ -267,12 +275,14 @@ Read the files in this order:
 
 5. `src/alignmentTime.ts` — shared timestamp-mapping helpers. `localToAligned`, `alignedToLocal`, `segmentAlignedWindow`, `isInPause`, and `alignedRangeToLocalWindows`. The single source of truth for the local-time segment contract; every consumer of `OffsetSegment` uses these.
 
-6. `src/stats.ts` — `computeFileStats` and `computePairwiseStats`. Uses `alignedToLocal`, `alignedRangeToLocalWindows`, and `isInPause` from the shared helpers rather than duplicating offset arithmetic.
+6. `src/stats.ts` -- `computeFileStats`, `computePairwiseStats`, and `computeComparisonStats`. A private helper creates the shared aligned pairs. The power result adds bias, limits of agreement, a fixed-margin TOST summary, effect size, concordance, and error measures without adding a statistics dependency.
 
 7. `src/store.ts` -- the Zustand store. Read `addFiles` to see how parse, resample, and align are chained. Read the offset mutation actions to see how manual edits propagate.
 
 8. `src/components/FitGraph.tsx` -- the most involved UI component. `buildChartData` constructs uPlot's `AlignedData` from raw records with per-segment offset adjustment. The effects manage uPlot lifecycle, data updates, and selection synchronisation.
 
-9. `src/App.tsx` -- the shell. Shows the vertical composition of all components and the alignment-failure banner condition.
+9. `src/components/StatsPanel.tsx` and `src/components/ComparisonView.tsx` -- the stats orchestration and the power-specific presentation boundary.
+
+10. `src/App.tsx` -- the shell. Shows the vertical composition of all components and the alignment-failure banner condition.
 
 That is the whole project.

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option 2: Side-by-side Comparison Cards</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg-app: #f6f7f9;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f1f3f5;
+    --border-subtle: #eef0f2;
+    --border-default: #d4d7dc;
+    --text-primary: #14161a;
+    --text-secondary: #5b6470;
+    --text-muted: #8a929c;
+    --accent: #0b6bcb;
+    --accent-soft: #e7f0fb;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.05);
+
+    --verdict-pass-bg: #eaf7ea;
+    --verdict-pass-text: #1a5c1a;
+    --verdict-fail-bg: #fdf0ed;
+    --verdict-fail-text: #7a2a1a;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    padding: 32px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .mockup-container {
+    width: 100%;
+    max-width: 780px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 16px;
+  }
+
+  /* -- Two-column card layout -- */
+  .cards-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .compare-card {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+  }
+
+  .card-file-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .card-file-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .card-file-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .card-file-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* -- Stat rows inside cards -- */
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 0;
+  }
+
+  .stat-row + .stat-row {
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .stat-row-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .stat-row-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    text-align: right;
+  }
+
+  .stat-row-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  /* -- Verdict chip -- */
+  .verdict-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 999px;
+    margin-top: 12px;
+  }
+
+  .verdict-chip.pass {
+    background: var(--verdict-pass-bg);
+    color: var(--verdict-pass-text);
+  }
+  .verdict-chip.fail {
+    background: var(--verdict-fail-bg);
+    color: var(--verdict-fail-text);
+  }
+
+  .verdict-chip-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  .pass .verdict-chip-dot { background: #2d8a2d; }
+  .fail .verdict-chip-dot { background: #c0392b; }
+
+  /* -- Middle column: delta summary -- */
+  .delta-card {
+    background: var(--bg-surface);
+    border: 1px dashed var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+  }
+
+  .delta-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  .delta-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .delta-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .delta-bars {
+    display: flex;
+    gap: 2px;
+    margin-top: 4px;
+  }
+
+  .delta-bar {
+    width: 20px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-default);
+  }
+
+  .delta-bar.filled { background: var(--accent); }
+
+  /* -- Three-column: left, middle (delta), right -- */
+  .three-col {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0;
+    align-items: stretch;
+  }
+
+  @media (max-width: 640px) {
+    .three-col {
+      grid-template-columns: 1fr;
+    }
+    .cards-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-container">
+  <div class="section-label">Pairwise comparison</div>
+
+  <div class="three-col">
+
+    <!-- Left: File A -->
+    <div class="compare-card" style="border-right: none; border-radius: var(--radius-md) 0 0 var(--radius-md);">
+      <div class="card-file-header">
+        <span class="card-file-dot" style="background: #000000;"></span>
+        <div>
+          <div class="card-file-name">Assioma Left</div>
+          <div class="card-file-meta">Reference &middot; 7,201 records</div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <span class="stat-row-label">Mean power</span>
+        <span class="stat-row-value">233.7 W</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-row-label">Max power</span>
+        <span class="stat-row-value">612 W</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-row-label">Std dev</span>
+        <span class="stat-row-value">84.3 W</span>
+      </div>
+    </div>
+
+    <!-- Middle: Delta summary -->
+    <div class="delta-card" style="border-left: none; border-right: none; border-radius: 0;">
+      <div class="delta-label">Mean bias</div>
+      <div class="delta-value">-0.5 W</div>
+      <div class="delta-sub">-0.2%</div>
+      <div class="delta-bars">
+        <div class="delta-bar"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar filled"></div>
+        <div class="delta-bar"></div>
+      </div>
+      <div class="delta-sub" style="font-size: 10px;">LoA: -10.8 to +9.8 W</div>
+
+      <div class="verdict-chip pass">
+        <span class="verdict-chip-dot"></span>
+        Equivalent &plusmn;3%
+      </div>
+    </div>
+
+    <!-- Right: File B -->
+    <div class="compare-card" style="border-left: none; border-radius: 0 var(--radius-md) var(--radius-md) 0;">
+      <div class="card-file-header">
+        <span class="card-file-dot" style="background: #E69F00;"></span>
+        <div>
+          <div class="card-file-name">Assioma Right</div>
+          <div class="card-file-meta">7,201 records</div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <span class="stat-row-label">Mean power</span>
+        <span class="stat-row-value">233.2 W</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-row-label">Max power</span>
+        <span class="stat-row-value">609 W</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-row-label">Std dev</span>
+        <span class="stat-row-value">83.9 W</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Supporting stats below -->
+  <div style="margin-top: 20px;">
+    <div class="section-label">Additional metrics</div>
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+      <div>
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">CCC</div>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600;">0.996</div>
+        <div style="font-size: 10px; color: var(--text-muted);">Almost perfect</div>
+      </div>
+      <div>
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">RMSE</div>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600;">5.3 W</div>
+        <div style="font-size: 10px; color: var(--text-muted);">2.3% of mean</div>
+      </div>
+      <div>
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Cohen&rsquo;s dz</div>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600;">0.04</div>
+        <div style="font-size: 10px; color: var(--text-muted);">Negligible</div>
+      </div>
+      <div>
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Pearson r</div>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600;">0.998</div>
+        <div style="font-size: 10px; color: var(--text-muted);">Near-perfect</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

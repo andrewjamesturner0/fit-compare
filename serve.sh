@@ -5,7 +5,7 @@ PORT="${1:-8080}"
 DIR="${2:-dist}"
 
 if [ ! -d "$DIR" ]; then
-  echo "Directory '$DIR' not found. Run 'npm run build' first." >&2
+  echo "Directory '$DIR' not found. Run './rebuild.sh' first." >&2
   exit 1
 fi
 

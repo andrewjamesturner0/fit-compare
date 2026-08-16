@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option 3: Accordion Expand Details</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg-app: #f6f7f9;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f1f3f5;
+    --border-subtle: #eef0f2;
+    --border-default: #d4d7dc;
+    --text-primary: #14161a;
+    --text-secondary: #5b6470;
+    --text-muted: #8a929c;
+    --accent: #0b6bcb;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.05);
+
+    --verdict-pass: #1a5c1a;
+    --verdict-fail: #7a2a1a;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    padding: 32px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .mockup-container {
+    width: 100%;
+    max-width: 740px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 20px 24px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 10px;
+  }
+
+  /* -- Accordion row -- */
+  .accordion-row {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    margin-bottom: 6px;
+    background: var(--bg-subtle);
+    overflow: hidden;
+  }
+
+  .accordion-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: background 0.15s;
+  }
+
+  .accordion-summary:hover {
+    background: rgba(0,0,0,0.02);
+  }
+
+  .pair-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .pair-name {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .pair-vs {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .summary-stat {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: 6px;
+  }
+
+  .summary-stat-label {
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .verdict-tag {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+  }
+
+  .verdict-tag.pass {
+    background: #eaf7ea;
+    color: var(--verdict-pass);
+  }
+  .verdict-tag.fail {
+    background: #fdf0ed;
+    color: var(--verdict-fail);
+  }
+
+  .chevron {
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  /* -- Expanded detail panel -- */
+  .accordion-detail {
+    padding: 12px 14px 14px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .detail-stat {
+    /* nothing needed */
+  }
+
+  .detail-stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 1px;
+  }
+
+  .detail-stat-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .detail-stat-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  /* -- Show expanded state for the first row -- */
+  .accordion-row.expanded .chevron {
+    transform: rotate(90deg);
+  }
+
+  @media (max-width: 500px) {
+    .accordion-summary {
+      flex-wrap: wrap;
+    }
+    .accordion-detail {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-container">
+  <div class="section-label">Pairwise comparisons &mdash; click to expand</div>
+
+  <!-- Row 1: Expanded -->
+  <div class="accordion-row expanded">
+    <div class="accordion-summary">
+      <span class="chevron">&#9654;</span>
+      <span class="pair-dot" style="background: #000000;"></span>
+      <span class="pair-name">Assioma Left</span>
+      <span class="pair-vs">vs</span>
+      <span class="pair-dot" style="background: #E69F00;"></span>
+      <span class="pair-name">Assioma Right</span>
+      <span class="summary-stat"><span class="summary-stat-label">Bias</span> -0.5 W</span>
+      <span class="summary-stat"><span class="summary-stat-label">r</span> 0.998</span>
+      <span class="verdict-tag pass">Equivalent &plusmn;3%</span>
+    </div>
+    <div class="accordion-detail">
+      <div class="detail-stat">
+        <div class="detail-stat-label">Bias (mean diff)</div>
+        <div class="detail-stat-value">-0.5 W</div>
+        <div class="detail-stat-sub">-0.2% of mean</div>
+      </div>
+      <div class="detail-stat">
+        <div class="detail-stat-label">Limits of agreement</div>
+        <div class="detail-stat-value">-10.8 to +9.8 W</div>
+        <div class="detail-stat-sub">-4.6% to +4.2%</div>
+      </div>
+      <div class="detail-stat">
+        <div class="detail-stat-label">Effect size (dz)</div>
+        <div class="detail-stat-value">0.04</div>
+        <div class="detail-stat-sub">Negligible</div>
+      </div>
+      <div class="detail-stat">
+        <div class="detail-stat-label">CCC</div>
+        <div class="detail-stat-value">0.996</div>
+        <div class="detail-stat-sub">Almost perfect</div>
+      </div>
+      <div class="detail-stat">
+        <div class="detail-stat-label">RMSE</div>
+        <div class="detail-stat-value">5.3 W</div>
+        <div class="detail-stat-sub">2.3% of mean</div>
+      </div>
+      <div class="detail-stat">
+        <div class="detail-stat-label">TOST 90% CI</div>
+        <div class="detail-stat-value">[-1.8, +0.9] W</div>
+        <div class="detail-stat-sub">Margin &plusmn;7.0 W (3%)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: Collapsed -->
+  <div class="accordion-row">
+    <div class="accordion-summary">
+      <span class="chevron">&#9654;</span>
+      <span class="pair-dot" style="background: #000000;"></span>
+      <span class="pair-name">Assioma Left</span>
+      <span class="pair-vs">vs</span>
+      <span class="pair-dot" style="background: #0072B2;"></span>
+      <span class="pair-name">Quarq DZero</span>
+      <span class="summary-stat"><span class="summary-stat-label">Bias</span> +4.1 W</span>
+      <span class="summary-stat"><span class="summary-stat-label">r</span> 0.993</span>
+      <span class="verdict-tag fail">Not equivalent &plusmn;3%</span>
+    </div>
+  </div>
+
+  <!-- Row 3: Collapsed -->
+  <div class="accordion-row">
+    <div class="accordion-summary">
+      <span class="chevron">&#9654;</span>
+      <span class="pair-dot" style="background: #000000;"></span>
+      <span class="pair-name">Assioma Left</span>
+      <span class="pair-vs">vs</span>
+      <span class="pair-dot" style="background: #009E73;"></span>
+      <span class="pair-name">Stages Gen 3</span>
+      <span class="summary-stat"><span class="summary-stat-label">Bias</span> -7.2 W</span>
+      <span class="summary-stat"><span class="summary-stat-label">r</span> 0.987</span>
+      <span class="verdict-tag fail">Not equivalent &plusmn;3%</span>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
